@@ -9,11 +9,13 @@ import (
 	"errors"
 )
 
+const ErrKeyNotFound = errors.New("key not found")
+
 type Options struct {
-	TCPPort  *int
-	HTTPPort *int
+	TCPPort  int
+	HTTPPort int
 }
-type iqdb struct {
+type IqDB struct {
 	ln     net.Listener
 	reader *redis.Reader
 	writer *redis.Writer
@@ -21,8 +23,8 @@ type iqdb struct {
 	errch  chan error
 }
 
-func MakeServer(opts *Options) (*iqdb, error) {
-	db := &iqdb{
+func MakeServer(opts *Options) (*IqDB, error) {
+	db := &IqDB{
 		opts:  opts,
 		errch: make(chan error),
 	}
@@ -30,36 +32,36 @@ func MakeServer(opts *Options) (*iqdb, error) {
 	return db, nil
 }
 
-func (iq *iqdb) Start() error {
-	if iq.opts.TCPPort != nil {
+func (iq *IqDB) Start() error {
+	if iq.opts.TCPPort > 0 {
 		go iq.serveTCP()
 	}
 
-	if iq.opts.HTTPPort != nil {
+	if iq.opts.HTTPPort > 0 {
 		go iq.serveHTTP()
 	}
 
 	return <-iq.errch
 }
 
-func (iq *iqdb) serveHTTP() {
+func (iq *IqDB) serveHTTP() {
 	log.Info("Starting HTTP server ...")
 
-	log.Infof("HTTP server now accept connections on port %d ...", *iq.opts.HTTPPort)
+	log.Infof("HTTP server now accept connections on port %d ...", iq.opts.HTTPPort)
 }
 
-func (iq *iqdb) serveTCP() {
+func (iq *IqDB) serveTCP() {
 	var err error
 
 	log.Info("Starting TCP server ...")
 
-	iq.ln, err = net.Listen("tcp", ":"+strconv.Itoa(*iq.opts.TCPPort))
+	iq.ln, err = net.Listen("tcp", ":"+strconv.Itoa(iq.opts.TCPPort))
 	if err != nil {
 		iq.errch <- err
 		return
 	}
 
-	log.Infof("TCP server now accept connections on port %d ...", *iq.opts.TCPPort)
+	log.Infof("TCP server now accept connections on port %d ...", iq.opts.TCPPort)
 
 	for {
 		conn, err := iq.ln.Accept()
@@ -70,7 +72,7 @@ func (iq *iqdb) serveTCP() {
 	}
 }
 
-func (iq *iqdb) handleConnection(c net.Conn) {
+func (iq *IqDB) handleConnection(c net.Conn) {
 	reader := redis.NewReader(bufio.NewReader(c))
 	writer := redis.NewWriter(c)
 
