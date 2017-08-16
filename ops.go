@@ -23,15 +23,36 @@ type Client interface {
 
 // General KV
 func (db *IqDB) Get(key string) (string, error) {
+	db.kvmx.RLock()
+	defer db.kvmx.RUnlock()
+	v := db.kv[key]
 
+	if v == nil {
+		return "", ErrKeyNotFound
+	}
+
+	if v.dataType != dataTypeKV {
+		return "", ErrKeyTypeError
+	}
+
+	if v.ttl > 0 {
+		db.ttl.Delete(ttlTreeItem{ttl: v.ttl, key: key})
+	}
+	return v.value, nil
 }
 
 func (db *IqDB) Set(key, value string, ttl ...time.Duration) error {
-
+	db.kvmx.Lock()
+	defer db.kvmx.Unlock()
 }
 
 func (db *IqDB) Remove(key string) error {
+	db.kvmx.Lock()
+	defer db.kvmx.Unlock()
 
+	delete(db.kv, key)
+
+	return nil
 }
 
 func (db *IqDB) TTL(key string, ttl time.Duration) error {

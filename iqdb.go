@@ -7,20 +7,51 @@ import (
 	log "github.com/sirupsen/logrus"
 	"bufio"
 	"errors"
+	"sync"
+	"time"
 )
 
-const ErrKeyNotFound = errors.New("key not found")
+var ErrKeyNotFound = errors.New("key not found")
+var ErrKeyTypeError = errors.New("wrong key type")
+
+const (
+	dataTypeKV   = 1
+	dataTypeList = 2
+	dataTypeHash = 3
+)
 
 type Options struct {
 	TCPPort  int
 	HTTPPort int
 }
+
 type IqDB struct {
 	ln     net.Listener
 	reader *redis.Reader
 	writer *redis.Writer
 	opts   *Options
 	errch  chan error
+	kv     map[string]*kv
+	kvmx   sync.RWMutex
+	lists  map[string]*list
+	hashes map[string]*hash
+	ttl    *ttlTree
+}
+
+type kv struct {
+	ttl time.Duration
+	dataType int
+	value    string
+	list     *list
+	hash     *hash
+}
+type list struct {
+	list [][]byte
+}
+
+type hash struct {
+	mx   sync.RWMutex
+	hash map[string][]byte
 }
 
 func MakeServer(opts *Options) (*IqDB, error) {
