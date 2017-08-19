@@ -8,7 +8,6 @@ import (
 
 type TTLTreeItem interface {
 	Less(btree.Item) bool
-	Touch()
 }
 
 type ttlTreeItem struct {
@@ -24,10 +23,6 @@ func (i *ttlTreeItem) Less(than btree.Item) bool {
 	}
 
 	return i.expire.Before(than.(*ttlTreeItem).expire)
-}
-
-func (i *ttlTreeItem) Touch() {
-	i.expire = time.Now().Add(i.ttl)
 }
 
 func NewttlTreeItem(key string, ttl time.Duration) TTLTreeItem {
@@ -48,7 +43,7 @@ type ttlTree struct {
 
 func (t *ttlTree) ReplaceOrInsert(item ttlTreeItem) {
 	t.mu.Lock()
-	t.tree.ReplaceOrInsert(item)
+	t.tree.ReplaceOrInsert(&item)
 	t.mu.Unlock()
 }
 

@@ -23,6 +23,7 @@ const (
 type Options struct {
 	TCPPort  int
 	HTTPPort int
+	TTL      time.Duration
 }
 
 type IqDB struct {
@@ -31,17 +32,17 @@ type IqDB struct {
 	writer *redis.Writer
 	opts   *Options
 	errch  chan error
-	kv     map[string]*kv
+	kv     map[string]*KV
 	kvmx   sync.RWMutex
 	lists  map[string]*list
 	hashes map[string]*hash
 	ttl    *ttlTree
 }
 
-type kv struct {
-	ttl time.Duration
+type KV struct {
+	ttl      time.Duration
 	dataType int
-	value    string
+	Value    string
 	list     *list
 	hash     *hash
 }
