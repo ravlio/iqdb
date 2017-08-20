@@ -21,6 +21,7 @@ func (r *Reader) Read() (*Message, error) {
 	return read(r.r)
 }
 
+// Redis protocol reader
 func read(r *bufio.Reader) (*Message, error) {
 	line, e := r.ReadBytes('\n')
 

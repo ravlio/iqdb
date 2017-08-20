@@ -10,6 +10,7 @@ const (
 	TypeBulk    = "$"
 )
 
+// Redis protocol format
 type Message struct {
 	Type   string
 	String string

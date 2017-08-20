@@ -13,7 +13,12 @@ import (
 
 var ErrKeyNotFound = errors.New("key not found")
 var ErrKeyTypeError = errors.New("wrong key type")
+var ErrListIndexError = errors.New("wrong list index")
+var ErrListOutOfBounds = errors.New("list range out of bounds")
+var ErrHashKeyNotFound = errors.New("hash key not found")
+var ErrHashKeyValueMismatch = errors.New("hash keys and values mismatch")
 
+// Three types of storage items
 const (
 	dataTypeKV   = 1
 	dataTypeList = 2
@@ -21,24 +26,32 @@ const (
 )
 
 type Options struct {
-	TCPPort  int
-	HTTPPort int
-	TTL      time.Duration
+	TCPPort    int
+	HTTPPort   int
+	// Default TTL. Used if >0
+	TTL        time.Duration
+	ShardCount int
 }
 
 type IqDB struct {
-	ln     net.Listener
-	reader *redis.Reader
-	writer *redis.Writer
-	opts   *Options
-	errch  chan error
-	kv     map[string]*KV
-	kvmx   sync.RWMutex
-	lists  map[string]*list
-	hashes map[string]*hash
-	ttl    *ttlTree
+	// TCP listener
+	ln      net.Listener
+	// TCP reader and writer
+	reader  *redis.Reader
+	writer  *redis.Writer
+	opts    *Options
+	// Error channel for goroutines
+	errch   chan error
+	// Using distributed hashed map
+	distmap *distmap
+	// TTL tree with scheduler
+	ttl     *ttlTree
+	// Time callback for back to the future (ttl testing purposes)
+	timeCb  func() time.Time
 }
 
+// KeyValue entity
+// Contains all types as pointers so they would not occupy much memory, just pointers
 type KV struct {
 	ttl      time.Duration
 	dataType int
@@ -47,21 +60,35 @@ type KV struct {
 	hash     *hash
 }
 type list struct {
-	list [][]byte
+	// Mutex is needed upon writing
+	mx   sync.RWMutex
+	list []string
 }
 
 type hash struct {
-	mx   sync.RWMutex
-	hash map[string][]byte
+	// go 1.9+ sync.Map
+	hash *sync.Map
 }
 
 func MakeServer(opts *Options) (*IqDB, error) {
 	db := &IqDB{
-		opts:  opts,
-		errch: make(chan error),
+		opts:    opts,
+		distmap: NewDistmap(opts.ShardCount),
+		errch:   make(chan error),
 	}
 
+	db.timeCb = db.timeFunc
+
 	return db, nil
+}
+
+func (iq *IqDB) timeFunc() time.Time {
+	return time.Now()
+}
+
+// We can redefine time to force TTL expiring
+func (iq *IqDB) SetTimeFunc(cb func() time.Time) {
+	iq.timeCb = cb
 }
 
 func (iq *IqDB) Start() error {
@@ -122,5 +149,3 @@ func (iq *IqDB) handleConnection(c net.Conn) {
 		}
 	}
 }
-
-//println(string(msg.Arr[0].Bulk), string(msg.Arr[1].Bulk))

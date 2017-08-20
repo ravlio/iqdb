@@ -1,6 +1,9 @@
 package iqdb
 
-import "time"
+import (
+	"time"
+	"sync"
+)
 
 type Client interface {
 	Get(key string) (string, error)
@@ -23,12 +26,10 @@ type Client interface {
 
 // General KV
 func (db *IqDB) Get(key string) (string, error) {
-	db.kvmx.RLock()
-	defer db.kvmx.RUnlock()
-	v := db.kv[key]
+	v, err := db.distmap.Get(key)
 
-	if v == nil {
-		return "", ErrKeyNotFound
+	if err != nil {
+		return "", err
 	}
 
 	if v.dataType != dataTypeKV {
@@ -38,16 +39,14 @@ func (db *IqDB) Get(key string) (string, error) {
 	return v.Value, nil
 }
 
+// General set method. TTL may be optional as it's a slice
 func (db *IqDB) Set(key, value string, ttl ...time.Duration) error {
-	db.kvmx.Lock()
-	defer db.kvmx.Unlock()
-
 	kv := &KV{dataType: dataTypeKV, Value: value}
 	if ttl[0] > 0 {
 		kv.ttl = ttl[0]
 	}
 
-	db.kv[key] = kv
+	db.distmap.Set(key, kv)
 
 	if ttl[0] > 0 {
 		db.ttl.ReplaceOrInsert(ttlTreeItem{ttl: ttl[0], key: key})
@@ -59,16 +58,13 @@ func (db *IqDB) Set(key, value string, ttl ...time.Duration) error {
 }
 
 func (db *IqDB) Remove(key string) error {
-	db.kvmx.Lock()
-	defer db.kvmx.Unlock()
+	v, err := db.distmap.Get(key)
 
-	v := db.kv[key]
-
-	if v == nil {
-		return ErrKeyNotFound
+	if err != nil {
+		return err
 	}
 
-	delete(db.kv, key)
+	db.distmap.Remove(key)
 
 	if v.ttl > 0 {
 		db.ttl.Delete(&ttlTreeItem{ttl: v.ttl, key: key})
@@ -78,12 +74,10 @@ func (db *IqDB) Remove(key string) error {
 }
 
 func (db *IqDB) TTL(key string, ttl time.Duration) error {
-	db.kvmx.Lock()
-	defer db.kvmx.Unlock()
-	v := db.kv[key]
+	v, err := db.distmap.Get(key)
 
-	if v == nil {
-		return ErrKeyNotFound
+	if err != nil {
+		return err
 	}
 
 	if v.ttl == ttl || ttl == 0 {
@@ -96,62 +90,203 @@ func (db *IqDB) TTL(key string, ttl time.Duration) error {
 	return nil
 }
 
-func (db *IqDB) Keys() ([]string, error) {
-	resp := make([]string, len(db.kv))
-	i := 0
-	for k := range db.kv {
-		db.kvmx.RLock()
-		resp[i] = k
-		db.kvmx.RUnlock()
+func (db *IqDB) Keys() chan<- string {
+	return db.distmap.Range()
+}
+
+func (db *IqDB) Type(key string) (int, error) {
+	v, err := db.distmap.Get(key)
+
+	if err != nil {
+		return 0, err
 	}
 
-	return resp, nil
+	return v.dataType, nil
 }
 
 // Lists
-/*
-func (db *IqDB) ListLen(key string) (int, error) {
 
+// Helper method to obtain and check data type
+func (db *IqDB) List(key string) (*list, error) {
+	v, err := db.distmap.Get(key)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if v.dataType != dataTypeList {
+		return nil, ErrKeyTypeError
+	}
+
+	return v.list, nil
+}
+
+func (db *IqDB) ListLen(key string) (int, error) {
+	v, err := db.List(key)
+
+	if err != nil {
+		return 0, err
+	}
+
+	return len(v.list), nil
 }
 
 func (db *IqDB) ListIndex(key string, index int) (string, error) {
+	v, err := db.List(key)
 
+	if err != nil {
+		return "", err
+	}
+
+	if len(v.list) <= index {
+		return "", ErrListIndexError
+	}
+
+	return v.list[index], nil
 }
 
 func (db *IqDB) ListPush(key string, value ...string) (int, error) {
+	v, err := db.List(key)
 
+	if err != nil && err != ErrKeyNotFound {
+		return 0, err
+	} else if err == ErrKeyNotFound {
+		v.list = make([]string, 0)
+	}
+
+	v.mx.Lock()
+	defer v.mx.Unlock()
+
+	for _, val := range value {
+		v.list = append(v.list, val)
+	}
+
+	return len(v.list), nil
 }
 
 func (db *IqDB) ListPop(key string) (int, error) {
+	v, err := db.List(key)
 
+	if err != nil {
+		return 0, err
+	}
+
+	v.mx.Lock()
+	defer v.mx.Unlock()
+
+	l := len(v.list)
+	if l == 0 {
+		return 0, nil
+	}
+
+	v.list = v.list[0:l-1]
+
+	return l, nil
 }
 
 func (db *IqDB) ListRange(key string, from, to int) ([]string, error) {
+	v, err := db.List(key)
 
+	if err != nil {
+		return nil, err
+	}
+
+	if from < 0 || len(v.list) >= to || from > to {
+		return nil, ErrListOutOfBounds
+	}
+
+	return v.list[from:to], nil
 }
 
 // Hashes
-func (db *IqDB) HashLen(key string) (int, error) {
+func (db *IqDB) Hash(key string) (*hash, error) {
+	v, err := db.distmap.Get(key)
 
+	if err != nil {
+		return nil, err
+	}
+
+	if v.dataType != dataTypeHash {
+		return nil, ErrKeyTypeError
+	}
+
+	return v.hash, nil
 }
 
 func (db *IqDB) HashGet(key string, field string) (string, error) {
+	v, err := db.Hash(key)
 
+	if err != nil {
+		return nil, err
+	}
+
+	if s, ok := v.hash.Load(field); ok {
+		return s.(string), nil
+	}
+
+	return "", ErrHashKeyNotFound
 }
 
 func (db *IqDB) HashGetAll(key string) (map[string]string, error) {
+	v, err := db.Hash(key)
 
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make(map[string]string)
+	v.hash.Range(func(key, value interface{}) bool {
+		ret[key.(string)] = value.(string)
+	})
+
+	return ret, nil
 }
 
 func (db *IqDB) HashKeys(key string) ([]string, error) {
+	v, err := db.Hash(key)
 
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make([]string, 0)
+	v.hash.Range(func(key, value interface{}) bool {
+		ret = append(ret, key.(string))
+	})
+
+	return ret, nil
 }
 
-func (db *IqDB) HashDel(key string, field ...string) (int, error) {
+func (db *IqDB) HashDel(key string, field string) error {
+	v, err := db.Hash(key)
 
+	if err != nil {
+		return err
+	}
+
+	v.hash.Delete(field)
+
+	return nil
 }
 
-func (db *IqDB) HashSet(key string, field int) (string, error) {
+func (db *IqDB) HashSet(key string, args ...string) error {
 
+	if len(args)%2 != nil {
+		return ErrHashKeyValueMismatch
+	}
+
+	v, err := db.Hash(key)
+
+	if err != nil && err != ErrKeyNotFound {
+		return err
+	} else if err == ErrKeyNotFound {
+		v.hash = &sync.Map{}
+	}
+
+	for i := 0; i < len(args); i += 2 {
+		v.hash.Store(args[i], args[i+1])
+
+	}
+
+	return nil
 }
-*/

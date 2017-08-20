@@ -18,6 +18,7 @@ func NewWriter(w io.Writer) *Writer {
 	}
 }
 
+// Write data
 func (w *Writer) Write(args ...interface{}) error {
 	argsNum := len(args)
 	buf := make([]byte, 0, 10*argsNum)

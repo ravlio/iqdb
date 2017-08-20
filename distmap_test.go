@@ -9,6 +9,7 @@ import (
 )
 
 var m map[string]*iqdb.KV
+var dm1 = iqdb.NewDistmap(1)
 var dm10 = iqdb.NewDistmap(10)
 var dm100 = iqdb.NewDistmap(100)
 
@@ -22,6 +23,8 @@ func init() {
 
 	for i := 0; i < it; i++ {
 		is := strconv.Itoa(i)
+		// Generating predefined pseudo-random keys
+		// To not impact rand calling on each bench iteration
 		rnd = append(rnd, strconv.Itoa(rand.Intn(it)))
 
 		kv := &iqdb.KV{Value: is}
@@ -55,6 +58,33 @@ func BenchmarkNormalMapRandomRead(b *testing.B) {
 			mx.RLock()
 			_ = m[rnd[i]]
 			mx.RUnlock()
+			i++
+			if i >= it {
+				i = 0
+			}
+		}
+	})
+}
+
+func Benchmark1ShardMapSequentialRead(b *testing.B) {
+	var i = 0
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			dm1.Get(strconv.Itoa(i))
+			i++
+			if i > it {
+				i = 0
+			}
+		}
+	})
+}
+
+// The oblivious winner
+func Benchmark1ShardMapRandomRead(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		var i = 0
+		for pb.Next() {
+			dm1.Get(rnd[i])
 			i++
 			if i >= it {
 				i = 0

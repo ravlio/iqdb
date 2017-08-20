@@ -7,67 +7,71 @@ import (
 )
 
 type distmap struct {
-	shards     map[uint32]*shard
+	// Shards for faster access and keys distribution among multiple servers and replicas
+	shards     []*shard
 	mx         *sync.RWMutex
-	shardCount uint32
+	shardCount int
 }
 
 type shard struct {
-	kv map[string]*KV
-	mx *sync.RWMutex
+	// golang 1.9+ sync.map without additional mutex using
+	kv *sync.Map
 }
 
+// Simple hashing algorithm for getting properly hard against key
 func (dm *distmap) getShard(key string) *shard {
-	hasher := sha1.New()
-	hasher.Write([]byte(key))
-	shardKey := binary.BigEndian.Uint32(hasher.Sum(nil)) % dm.shardCount
+	var shardKey int
 
-	dm.mx.Lock()
-	defer dm.mx.Unlock()
-
-	s, ok := dm.shards[shardKey]
-
-	if ok {
-		return s
+	// Optimization for one shard local system, boost about x20 performance by
+	// omitting hash calling
+	if dm.shardCount > 1 {
+		hasher := sha1.New()
+		hasher.Write([]byte(key))
+		shardKey = int(binary.BigEndian.Uint32(hasher.Sum(nil)) % uint32(dm.shardCount))
 	}
 
-	s = &shard{
-		kv: make(map[string]*KV),
-		mx: &sync.RWMutex{},
-	}
-	dm.shards[shardKey] = s
-
-	return s
+	return dm.shards[shardKey]
 }
 
 func (dm *distmap) Get(key string) (*KV, error) {
 	shard := dm.getShard(key)
-	shard.mx.RLock()
-	defer shard.mx.RUnlock()
 
-	v, ok := shard.kv[key]
+	v, ok := shard.kv.Load(key)
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
 
-	return v, nil
+	return v.(*KV), nil
 }
 
 func (dm *distmap) Set(key string, kv *KV) error {
 	shard := dm.getShard(key)
-	shard.mx.Lock()
-	defer shard.mx.Unlock()
 
-	shard.kv[key] = kv
+	shard.kv.Store(key, kv)
+	return nil
+}
+
+func (dm *distmap) Remove(key string) error {
+	shard := dm.getShard(key)
+
+	_, ok := shard.kv.Load(key)
+	if !ok {
+		return ErrKeyNotFound
+	}
+
+	shard.kv.Delete(key)
 
 	return nil
 }
 
+// Range through keys. Warning: maybe slow down other operations
+// More shards - more speed
 func (dm *distmap) Range() chan<- string {
 	out := make(chan<- string)
 
-	shards := make([]uint32, len(dm.shards))
+	shards := make([]int, len(dm.shards))
 
+	// Mutex is using only here
 	dm.mx.RLock()
 	var i = 0
 	for s := range dm.shards {
@@ -77,29 +81,33 @@ func (dm *distmap) Range() chan<- string {
 	dm.mx.RUnlock()
 
 	for _, sid := range shards {
+		shard := dm.shards[sid]
 
-		dm.mx.RLock()
-		shard, ok := dm.shards[sid]
-		dm.mx.RUnlock()
+		// Parallelize scanning between shards
+		go func() {
+			shard.kv.Range(func(key, value interface{}) bool {
+				out <- key.(string)
+				return true
+			})
 
-		if ok {
-			go func() {
-				shard.mx.RLock()
-				for k := range shard.kv {
-					out <- k
-				}
-				shard.mx.RUnlock()
-			}()
-		}
+		}()
 	}
 
 	return out
 }
 
-func NewDistmap(shardCont uint32) *distmap {
-	return &distmap{
-		shardCount:shardCont,
-		shards:make(map[uint32]*shard),
-		mx:&sync.RWMutex{},
+func NewDistmap(shardCount int) *distmap {
+	dm := &distmap{
+		shardCount: shardCount,
+		shards:     make([]*shard, shardCount),
+		mx:         &sync.RWMutex{},
 	}
+
+	for i := 0; i < shardCount; i++ {
+		dm.shards[i] = &shard{
+			kv: &sync.Map{},
+		}
+	}
+
+	return dm
 }
