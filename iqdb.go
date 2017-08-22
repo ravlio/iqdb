@@ -26,8 +26,8 @@ const (
 )
 
 type Options struct {
-	TCPPort    int
-	HTTPPort   int
+	TCPPort  int
+	HTTPPort int
 	// Default TTL. Used if >0
 	TTL        time.Duration
 	ShardCount int
@@ -35,19 +35,19 @@ type Options struct {
 
 type IqDB struct {
 	// TCP listener
-	ln      net.Listener
+	ln net.Listener
 	// TCP reader and writer
-	reader  *redis.Reader
-	writer  *redis.Writer
-	opts    *Options
+	reader *redis.Reader
+	writer *redis.Writer
+	opts   *Options
 	// Error channel for goroutines
-	errch   chan error
+	errch chan error
 	// Using distributed hashed map
 	distmap *distmap
 	// TTL tree with scheduler
-	ttl     *ttlTree
+	ttl *ttlTree
 	// Time callback for back to the future (ttl testing purposes)
-	timeCb  func() time.Time
+	timeCb func() time.Time
 }
 
 // KeyValue entity
@@ -61,7 +61,7 @@ type KV struct {
 }
 type list struct {
 	// Mutex is needed upon writing
-	mx   sync.RWMutex
+	mx   *sync.RWMutex
 	list []string
 }
 
@@ -71,24 +71,28 @@ type hash struct {
 }
 
 func MakeServer(opts *Options) (*IqDB, error) {
+	if opts.ShardCount <= 0 {
+		opts.ShardCount = 1
+	}
+
 	db := &IqDB{
 		opts:    opts,
 		distmap: NewDistmap(opts.ShardCount),
 		errch:   make(chan error),
 	}
 
-	db.timeCb = db.timeFunc
+	db.ttl = NewTTLTree(db.removeFromHash)
 
 	return db, nil
 }
 
-func (iq *IqDB) timeFunc() time.Time {
+var timeFunc = func() time.Time {
 	return time.Now()
 }
 
 // We can redefine time to force TTL expiring
-func (iq *IqDB) SetTimeFunc(cb func() time.Time) {
-	iq.timeCb = cb
+func SetTimeFunc(cb func() time.Time) {
+	timeFunc = cb
 }
 
 func (iq *IqDB) Start() error {

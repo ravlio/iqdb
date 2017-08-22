@@ -29,7 +29,6 @@ func read(r *bufio.Reader) (*Message, error) {
 		return nil, e
 	}
 
-	println(string(line))
 	line = line[:len(line)-2]
 	msgtype := string(line[0])
 	data := string(line[1:])

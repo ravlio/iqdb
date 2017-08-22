@@ -109,5 +109,6 @@ func NewDistmap(shardCount int) *distmap {
 		}
 	}
 
+	
 	return dm
 }

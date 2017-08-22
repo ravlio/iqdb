@@ -25,16 +25,16 @@ func (i *ttlTreeItem) Less(than btree.Item) bool {
 	return i.expire.Before(than.(*ttlTreeItem).expire)
 }
 
-func NewttlTreeItem(key string, ttl time.Duration) TTLTreeItem {
-	return &ttlTreeItem{
+func NewttlTreeItem(key string, ttl time.Duration) ttlTreeItem {
+	return ttlTreeItem{
 		key:    key,
 		ttl:    ttl,
-		expire: time.Now().Add(ttl),
+		expire: timeFunc().Add(ttl),
 	}
 }
 
 type ttlTree struct {
-	db     *IqDB
+	delCb  func(key string) error
 	tree   *btree.BTree
 	ticker *time.Ticker
 
@@ -42,6 +42,7 @@ type ttlTree struct {
 }
 
 func (t *ttlTree) ReplaceOrInsert(item ttlTreeItem) {
+
 	t.mu.Lock()
 	t.tree.ReplaceOrInsert(&item)
 	t.mu.Unlock()
@@ -57,26 +58,30 @@ func (t *ttlTree) Delete(item btree.Item) {
 
 func (t *ttlTree) loop() {
 	for range t.ticker.C {
-		items := []btree.Item{}
-
-		t.mu.Lock()
-		t.tree.AscendLessThan(&ttlTreeItem{expire: time.Now()}, func(item btree.Item) bool {
-			items = append(items, item)
-
-			return true
-		})
-		t.mu.Unlock()
-
-		for _, item := range items {
-			t.Delete(item)
-			_ = t.db.Remove(item.(*ttlTreeItem).key)
-		}
+		t.checkTTL()
 	}
 }
 
-func NewTTLTree(db *IqDB) *ttlTree {
+func (t *ttlTree) checkTTL() {
+	items := []btree.Item{}
+
+	t.mu.Lock()
+	t.tree.AscendLessThan(&ttlTreeItem{expire: timeFunc()}, func(item btree.Item) bool {
+		items = append(items, item)
+
+		return true
+	})
+	t.mu.Unlock()
+
+	for _, item := range items {
+		t.Delete(item)
+		_ = t.delCb(item.(*ttlTreeItem).key)
+	}
+}
+
+func NewTTLTree(delCb func(key string) error) *ttlTree {
 	tree := &ttlTree{
-		db:     db,
+		delCb:  delCb,
 		tree:   btree.New(32),
 		ticker: time.NewTicker(time.Second),
 
