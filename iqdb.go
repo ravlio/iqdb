@@ -9,6 +9,9 @@ import (
 	"errors"
 	"sync"
 	"time"
+	"os"
+	"io"
+	"encoding/binary"
 )
 
 var ErrKeyNotFound = errors.New("key not found")
@@ -25,12 +28,27 @@ const (
 	dataTypeHash = 3
 )
 
+const (
+	opSet      = 1
+	opRemove   = 2
+	opTTL      = 3
+	opListPush = 4
+	opHashDel  = 5
+	opHashSet  = 6
+)
+
 type Options struct {
 	TCPPort  int
 	HTTPPort int
 	// Default TTL. Used if >0
 	TTL        time.Duration
 	ShardCount int
+	// Predefined cluster size, right now the only way
+	ClusterSize int
+	// Disable async
+	NoAsync bool
+	// Buffer sync period
+	SyncPeriod time.Duration
 }
 
 type IqDB struct {
@@ -47,7 +65,12 @@ type IqDB struct {
 	// TTL tree with scheduler
 	ttl *ttlTree
 	// Time callback for back to the future (ttl testing purposes)
-	timeCb func() time.Time
+	timeCb     func() time.Time
+	aof        *os.File
+	aofBuf     *bufio.Writer
+	syncTicker *time.Ticker
+	isSyncing  bool
+	syncMx     *sync.Mutex
 }
 
 // KeyValue entity
@@ -59,6 +82,7 @@ type KV struct {
 	list     *list
 	hash     *hash
 }
+
 type list struct {
 	// Mutex is needed upon writing
 	mx   *sync.RWMutex
@@ -70,17 +94,38 @@ type hash struct {
 	hash *sync.Map
 }
 
-func MakeServer(opts *Options) (*IqDB, error) {
+func MakeServer(fname string, opts *Options) (*IqDB, error) {
 	if opts.ShardCount <= 0 {
 		opts.ShardCount = 1
+	}
+
+	if opts.ClusterSize <= 0 {
+		opts.ClusterSize = 1
+	}
+
+	if opts.SyncPeriod == 0 {
+		opts.SyncPeriod = time.Second
+	}
+
+	aof, err := os.OpenFile(fname, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return nil, err
 	}
 
 	db := &IqDB{
 		opts:    opts,
 		distmap: NewDistmap(opts.ShardCount),
 		errch:   make(chan error),
+		aof:     aof,
+		aofBuf:  bufio.NewWriter(aof),
 	}
 
+	if !opts.NoAsync && opts.SyncPeriod > 0 {
+		db.syncTicker = time.NewTicker(opts.SyncPeriod)
+		db.syncMx = &sync.Mutex{}
+		go db.runSyncer()
+
+	}
 	db.ttl = NewTTLTree(db.removeFromHash)
 
 	return db, nil
@@ -105,6 +150,14 @@ func (iq *IqDB) Start() error {
 	}
 
 	return <-iq.errch
+}
+
+func (iq IqDB) Close() error {
+	if !iq.opts.NoAsync {
+		iq.flushAOFBuffer()
+	}
+
+	return iq.aof.Close()
 }
 
 func (iq *IqDB) serveHTTP() {
@@ -152,4 +205,137 @@ func (iq *IqDB) handleConnection(c net.Conn) {
 			return
 		}
 	}
+}
+
+// Write operation with key to file/buffer
+func (iqdb *IqDB) writeKeyOp(op byte, key string, arg ...string) error {
+	var w io.Writer
+
+	if !iqdb.opts.NoAsync {
+		w = iqdb.aofBuf
+	} else {
+		w = iqdb.aof
+	}
+
+	iqdb.syncMx.Lock()
+	defer iqdb.syncMx.Unlock()
+
+	// op
+	w.Write([]byte(op))
+	// key
+	kb := []byte(key)
+	var l []byte
+	binary.LittleEndian.PutUint16(l, uint16(len(kb)))
+	w.Write(l)
+	w.Write(kb)
+
+	// args
+
+	for _, v := range arg {
+		// key
+		kb := []byte(v)
+		var l []byte
+		binary.LittleEndian.PutUint64(l, uint64(len(kb)))
+		w.Write(l)
+		w.Write(kb)
+	}
+}
+
+func (iqdb *IqDB) readOps() error {
+	iqdb.syncMx.Lock()
+	defer iqdb.syncMx.Unlock()
+
+	rdr := bufio.NewReader(iqdb.aof)
+
+	for {
+		var op []byte
+
+		n, err := iqdb.aof.Read(op)
+		if err != nil && err != io.EOF {
+			return err
+		}
+
+		if n == 0 {
+			break
+		}
+
+		switch op {
+		case opSet:
+			key, err := readString(rdr)
+			if err != nil {
+				return err
+			}
+			val, err := readString(rdr)
+			if err != nil {
+				return err
+			}
+		case opRemove:
+			key, err := readString(rdr)
+			if err != nil {
+				return err
+			}
+			val, err := readString(rdr)
+			if err != nil {
+				return err
+			}
+		case opTTL:
+			key, err := readString(rdr)
+			if err != nil {
+				return err
+			}
+			ttl, err := readString(rdr)
+			if err != nil {
+				return err
+			}
+		}
+		}
+	}
+}
+
+func readString(rdr io.Reader) (string, error) {
+	var l = make([]byte, 4)
+
+	_, err := rdr.Read(l)
+	if err != nil {
+		return "", err
+	}
+
+	b := make([]byte, binary.LittleEndian.Uint64(l))
+
+	_, err = rdr.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	return string(b), nil
+}
+
+func readBytes(rdr io.Reader) ([]byte, error) {
+	var l = make([]byte, 4)
+
+	_, err := rdr.Read(l)
+	if err != nil {
+		return "", err
+	}
+
+	b := make([]byte, binary.LittleEndian.Uint64(l))
+
+	_, err = rdr.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	return string(b), nil
+}
+
+func (iqdb *IqDB) runSyncer() {
+	for range iqdb.syncTicker.C {
+		iqdb.flushAOFBuffer()
+	}
+}
+
+func (iqdb *IqDB) flushAOFBuffer() {
+	iqdb.syncMx.Lock()
+	iqdb.aofBuf.Flush()
+	iqdb.syncMx.Unlock()
 }

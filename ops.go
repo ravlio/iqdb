@@ -3,6 +3,7 @@ package iqdb
 import (
 	"time"
 	"sync"
+	"strconv"
 )
 
 type Client interface {
@@ -54,7 +55,9 @@ func (db *IqDB) Set(key, value string, ttl ...time.Duration) error {
 		db.ttl.ReplaceOrInsert(NewttlTreeItem(key, db.opts.TTL))
 	}
 
-	return nil
+	err := db.writeKeyOp(opSet, key, value, strconv.Itoa(int(kv.ttl.Seconds())))
+
+	return err
 }
 
 func (db *IqDB) Remove(key string) error {
@@ -70,7 +73,9 @@ func (db *IqDB) Remove(key string) error {
 		db.ttl.Delete(&ttlTreeItem{ttl: v.ttl, key: key})
 	}
 
-	return nil
+	err = db.writeKeyOp(opRemove, key)
+
+	return err
 }
 
 func (db *IqDB) removeFromHash(key string) error {
@@ -93,7 +98,9 @@ func (db *IqDB) TTL(key string, ttl time.Duration) error {
 	v.ttl = ttl
 	db.ttl.ReplaceOrInsert(NewttlTreeItem(key, ttl))
 
-	return nil
+	err = db.writeKeyOp(opTTL, key, strconv.Itoa(int(ttl.Seconds())))
+
+	return err
 }
 
 func (db *IqDB) Keys() chan<- string {
@@ -172,7 +179,9 @@ func (db *IqDB) ListPush(key string, value ...string) (int, error) {
 		v.list = append(v.list, val)
 	}
 
-	return len(v.list), nil
+	err = db.writeKeyOp(opListPush, key, value...)
+
+	return len(v.list), err
 }
 
 func (db *IqDB) ListPop(key string) (int, error) {
@@ -192,7 +201,9 @@ func (db *IqDB) ListPop(key string) (int, error) {
 
 	v.list = v.list[0:l-1]
 
-	return l - 1, nil
+	err = db.writeKeyOp(opListPush, key)
+
+	return l - 1, err
 }
 
 func (db *IqDB) ListRange(key string, from, to int) ([]string, error) {
@@ -284,7 +295,9 @@ func (db *IqDB) HashDel(key string, field string) error {
 
 	v.hash.Delete(field)
 
-	return nil
+	err = db.writeKeyOp(opHashDel, key, field)
+
+	return err
 }
 
 func (db *IqDB) HashSet(key string, args ...string) error {
@@ -312,7 +325,9 @@ func (db *IqDB) HashSet(key string, args ...string) error {
 
 	}
 
-	return nil
+	err = db.writeKeyOp(opHashSet, key, args...)
+
+	return err
 }
 
 func (db *IqDB) newHash(key string) (*KV, error) {
