@@ -11,7 +11,7 @@ var httpPort = flag.Int("http", 8081, "http port")
 
 func main() {
 	log.Info("Starting ...")
-	db, err := iqdb.MakeServer(&iqdb.Options{
+	db, err := iqdb.Open(&iqdb.Options{
 		TCPPort:  *tcpPort,
 		HTTPPort: *httpPort,
 	})

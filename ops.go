@@ -26,8 +26,8 @@ type Client interface {
 }
 
 // General KV
-func (db *IqDB) Get(key string) (string, error) {
-	v, err := db.distmap.Get(key)
+func (iq *IqDB) Get(key string) (string, error) {
+	v, err := iq.distmap.Get(key)
 
 	if err != nil {
 		return "", err
@@ -41,51 +41,80 @@ func (db *IqDB) Get(key string) (string, error) {
 }
 
 // General set method. TTL may be optional as it's a slice
-func (db *IqDB) Set(key, value string, ttl ...time.Duration) error {
-	kv := &KV{dataType: dataTypeKV, Value: value}
-	if ttl != nil && ttl[0] > 0 {
-		kv.ttl = ttl[0]
-	}
-
-	db.distmap.Set(key, kv)
+func (iq *IqDB) Set(key, value string, ttl ...time.Duration) error {
+	var t time.Duration
 
 	if ttl != nil && ttl[0] > 0 {
-		db.ttl.ReplaceOrInsert(NewttlTreeItem(key, ttl[0]))
-	} else if db.opts.TTL > 0 {
-		db.ttl.ReplaceOrInsert(NewttlTreeItem(key, db.opts.TTL))
+		t = ttl[0]
 	}
 
-	err := db.writeKeyOp(opSet, key, value, strconv.Itoa(int(kv.ttl.Seconds())))
+	err := iq.set(key, value, t, true)
+
+	err = iq.writeKeyOp(opSet, key, value, strconv.Itoa(int(t.Seconds())))
 
 	return err
 }
 
-func (db *IqDB) Remove(key string) error {
-	v, err := db.distmap.Get(key)
+func (iq *IqDB) set(key, value string, ttl time.Duration, lock bool) error {
+	kv := &KV{dataType: dataTypeKV, Value: value}
+
+	if ttl > 0 {
+		kv.ttl = ttl
+	}
+
+	err := iq.distmap.Set(key, kv)
+	if err != nil {
+		return err
+	}
+
+	if ttl > 0 {
+		iq.ttl.ReplaceOrInsert(NewttlTreeItem(key, ttl))
+	} else if iq.opts.TTL > 0 {
+		iq.ttl.ReplaceOrInsert(NewttlTreeItem(key, iq.opts.TTL))
+	}
+
+	return nil
+}
+
+func (iq *IqDB) Remove(key string) error {
+	err := iq.remove(key, true)
+
+	err = iq.writeKeyOp(opRemove, key)
+
+	return err
+}
+
+func (iq *IqDB) remove(key string, lock bool) error {
+	v, err := iq.distmap.Get(key)
 
 	if err != nil {
 		return err
 	}
 
-	db.distmap.Remove(key)
+	iq.distmap.Remove(key)
 
 	if v.ttl > 0 {
-		db.ttl.Delete(&ttlTreeItem{ttl: v.ttl, key: key})
+		iq.ttl.Delete(&ttlTreeItem{ttl: v.ttl, key: key})
 	}
 
-	err = db.writeKeyOp(opRemove, key)
-
-	return err
+	return nil
 }
-
-func (db *IqDB) removeFromHash(key string) error {
-	db.distmap.Remove(key)
+func (iq *IqDB) removeFromHash(key string) error {
+	iq.distmap.Remove(key)
 
 	return nil
 }
 
-func (db *IqDB) TTL(key string, ttl time.Duration) error {
-	v, err := db.distmap.Get(key)
+func (iq *IqDB) TTL(key string, ttl time.Duration) error {
+	err := iq._ttl(key, ttl, true)
+
+	err = iq.writeKeyOp(opTTL, key, strconv.Itoa(int(ttl.Seconds())))
+
+	return err
+}
+
+func (iq *IqDB) _ttl(key string, ttl time.Duration, lock bool) error {
+	v, err := iq.distmap.Get(key)
 
 	if err != nil {
 		return err
@@ -96,19 +125,17 @@ func (db *IqDB) TTL(key string, ttl time.Duration) error {
 	}
 
 	v.ttl = ttl
-	db.ttl.ReplaceOrInsert(NewttlTreeItem(key, ttl))
+	iq.ttl.ReplaceOrInsert(NewttlTreeItem(key, ttl))
 
-	err = db.writeKeyOp(opTTL, key, strconv.Itoa(int(ttl.Seconds())))
-
-	return err
+	return nil
 }
 
-func (db *IqDB) Keys() chan<- string {
-	return db.distmap.Range()
+func (iq *IqDB) Keys() chan<- string {
+	return iq.distmap.Range()
 }
 
-func (db *IqDB) Type(key string) (int, error) {
-	v, err := db.distmap.Get(key)
+func (iq *IqDB) Type(key string) (int, error) {
+	v, err := iq.distmap.Get(key)
 
 	if err != nil {
 		return 0, err
@@ -120,8 +147,8 @@ func (db *IqDB) Type(key string) (int, error) {
 // Lists
 
 // Helper method to obtain and check data type
-func (db *IqDB) List(key string) (*list, error) {
-	v, err := db.distmap.Get(key)
+func (iq *IqDB) list(key string) (*list, error) {
+	v, err := iq.distmap.Get(key)
 
 	if err != nil {
 		return nil, err
@@ -134,8 +161,8 @@ func (db *IqDB) List(key string) (*list, error) {
 	return v.list, nil
 }
 
-func (db *IqDB) ListLen(key string) (int, error) {
-	v, err := db.List(key)
+func (iq *IqDB) ListLen(key string) (int, error) {
+	v, err := iq.list(key)
 
 	if err != nil {
 		return 0, err
@@ -144,8 +171,8 @@ func (db *IqDB) ListLen(key string) (int, error) {
 	return len(v.list), nil
 }
 
-func (db *IqDB) ListIndex(key string, index int) (string, error) {
-	v, err := db.List(key)
+func (iq *IqDB) ListIndex(key string, index int) (string, error) {
+	v, err := iq.list(key)
 
 	if err != nil {
 		return "", err
@@ -158,13 +185,21 @@ func (db *IqDB) ListIndex(key string, index int) (string, error) {
 	return v.list[index], nil
 }
 
-func (db *IqDB) ListPush(key string, value ...string) (int, error) {
-	v, err := db.List(key)
+func (iq *IqDB) ListPush(key string, value ...string) (int, error) {
+	l, err := iq.listPush(key, value, true)
+
+	err = iq.writeKeyOp(opListPush, key, value...)
+
+	return l, err
+}
+
+func (iq *IqDB) listPush(key string, value []string, lock bool) (int, error) {
+	v, err := iq.list(key)
 
 	if err != nil && err != ErrKeyNotFound {
 		return 0, err
 	} else if err == ErrKeyNotFound {
-		l, err := db.newList(key)
+		l, err := iq.newList(key)
 
 		if err != nil {
 			return 0, err
@@ -179,13 +214,23 @@ func (db *IqDB) ListPush(key string, value ...string) (int, error) {
 		v.list = append(v.list, val)
 	}
 
-	err = db.writeKeyOp(opListPush, key, value...)
-
-	return len(v.list), err
+	return len(v.list), nil
 }
 
-func (db *IqDB) ListPop(key string) (int, error) {
-	v, err := db.List(key)
+func (iq *IqDB) ListPop(key string) (int, error) {
+	l, err := iq.listPop(key, true)
+
+	if err!=nil {
+		return 0, err
+	}
+
+	err = iq.writeKeyOp(opListPop, key)
+
+	return l, err
+}
+
+func (iq *IqDB) listPop(key string, lock bool) (int, error) {
+	v, err := iq.list(key)
 
 	if err != nil {
 		return 0, err
@@ -201,13 +246,11 @@ func (db *IqDB) ListPop(key string) (int, error) {
 
 	v.list = v.list[0:l-1]
 
-	err = db.writeKeyOp(opListPush, key)
+	return len(v.list), nil
 
-	return l - 1, err
 }
-
-func (db *IqDB) ListRange(key string, from, to int) ([]string, error) {
-	v, err := db.List(key)
+func (iq *IqDB) ListRange(key string, from, to int) ([]string, error) {
+	v, err := iq.list(key)
 
 	if err != nil {
 		return nil, err
@@ -221,8 +264,8 @@ func (db *IqDB) ListRange(key string, from, to int) ([]string, error) {
 }
 
 // Hashes
-func (db *IqDB) Hash(key string) (*hash, error) {
-	v, err := db.distmap.Get(key)
+func (iq *IqDB) hash(key string) (*hash, error) {
+	v, err := iq.distmap.Get(key)
 
 	if err != nil {
 		return nil, err
@@ -235,8 +278,8 @@ func (db *IqDB) Hash(key string) (*hash, error) {
 	return v.hash, nil
 }
 
-func (db *IqDB) HashGet(key string, field string) (string, error) {
-	v, err := db.Hash(key)
+func (iq *IqDB) HashGet(key string, field string) (string, error) {
+	v, err := iq.hash(key)
 
 	if err != nil {
 		return "", err
@@ -249,8 +292,8 @@ func (db *IqDB) HashGet(key string, field string) (string, error) {
 	return "", ErrHashKeyNotFound
 }
 
-func (db *IqDB) HashGetAll(key string) (map[string]string, error) {
-	v, err := db.Hash(key)
+func (iq *IqDB) HashGetAll(key string) (map[string]string, error) {
+	v, err := iq.hash(key)
 
 	if err != nil {
 		return nil, err
@@ -265,8 +308,8 @@ func (db *IqDB) HashGetAll(key string) (map[string]string, error) {
 	return ret, nil
 }
 
-func (db *IqDB) HashKeys(key string) ([]string, error) {
-	v, err := db.Hash(key)
+func (iq *IqDB) HashKeys(key string) ([]string, error) {
+	v, err := iq.hash(key)
 
 	if err != nil {
 		return nil, err
@@ -281,8 +324,19 @@ func (db *IqDB) HashKeys(key string) ([]string, error) {
 	return ret, nil
 }
 
-func (db *IqDB) HashDel(key string, field string) error {
-	v, err := db.Hash(key)
+func (iq *IqDB) HashDel(key string, field string) error {
+	err := iq.hashDel(key, field, true)
+	if err != nil {
+		return err
+	}
+
+	err = iq.writeKeyOp(opHashDel, key, field)
+
+	return err
+}
+
+func (iq *IqDB) hashDel(key, field string, lock bool) error {
+	v, err := iq.hash(key)
 
 	if err != nil {
 		return err
@@ -295,55 +349,67 @@ func (db *IqDB) HashDel(key string, field string) error {
 
 	v.hash.Delete(field)
 
-	err = db.writeKeyOp(opHashDel, key, field)
-
-	return err
+	return nil
 }
 
-func (db *IqDB) HashSet(key string, args ...string) error {
+func (iq *IqDB) HashSet(key string, args ...string) error {
 
 	if len(args)%2 != 0 {
 		return ErrHashKeyValueMismatch
 	}
 
-	v, err := db.Hash(key)
+	kv := make(map[string]string)
+	for i := 0; i < len(args); i += 2 {
+		kv[args[i]] = args[i+1]
+
+	}
+
+	err := iq.hashSet(key, kv, true)
+	if err != nil {
+		return err
+	}
+
+	err = iq.writeKeyOp(opHashSet, key, args...)
+
+	return err
+}
+
+func (iq *IqDB) hashSet(key string, kv map[string]string, lock bool) error {
+	h, err := iq.hash(key)
 
 	if err != nil && err != ErrKeyNotFound {
 		return err
 	} else if err == ErrKeyNotFound {
-		h, err := db.newHash(key)
+		nh, err := iq.newHash(key)
 
 		if err != nil {
 			return err
 		}
 
-		v = h.hash
+		h = nh.hash
 	}
 
-	for i := 0; i < len(args); i += 2 {
-		v.hash.Store(args[i], args[i+1])
-
+	for k,v:=range kv {
+		h.hash.Store(k,v)
 	}
 
-	err = db.writeKeyOp(opHashSet, key, args...)
-
-	return err
+	return nil
 }
 
-func (db *IqDB) newHash(key string) (*KV, error) {
+func (iq *IqDB) newHash(key string) (*KV, error) {
 	kv := &KV{dataType: dataTypeHash, hash: &hash{&sync.Map{}}}
-	err := db.distmap.Set(key, kv)
+	err := iq.distmap.Set(key, kv)
 
 	return kv, err
 }
 
-func (db *IqDB) newList(key string) (*KV, error) {
+func (iq *IqDB) newList(key string) (*KV, error) {
 	kv := &KV{dataType: dataTypeList, list: &list{mx: &sync.RWMutex{}, list: make([]string, 0)}}
-	err := db.distmap.Set(key, kv)
+	err := iq.distmap.Set(key, kv)
 
 	return kv, err
 }
 
-func (db *IqDB) ForeTTLRecheck() {
-	db.ttl.checkTTL()
+func (iq *IqDB) ForeTTLRecheck() {
+	iq.ttl.checkTTL()
 }

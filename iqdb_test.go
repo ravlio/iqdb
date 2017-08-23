@@ -12,13 +12,151 @@ var db *iqdb.IqDB
 
 func TestMain(m *testing.M) {
 	var err error
-	db, err = iqdb.MakeServer(&iqdb.Options{TCPPort: 7777, HTTPPort: 8888, ShardCount: 100})
+
+	// Cleanup test db
+	if _, err := os.Stat("test"); err == nil {
+		os.Remove("test")
+	}
+
+	db, err = iqdb.Open("test", &iqdb.Options{TCPPort: 7777, HTTPPort: 8888, ShardCount: 100})
 
 	if err != nil {
 		panic(err)
 	}
 
-	os.Exit(m.Run())
+	c := m.Run()
+
+	err = db.Close()
+
+	if err != nil {
+		panic(err)
+	}
+
+	if _, err := os.Stat("test"); err == nil {
+		os.Remove("test")
+	} else {
+		panic("no db file!")
+	}
+
+	os.Exit(c)
+}
+
+func TestAOF(t *testing.T) {
+	var err error
+
+	ass := assert.New(t)
+
+	err = db.Set("k1", "v1", time.Second*10)
+	if !ass.NoError(err) {
+		return
+	}
+	err = db.Set("k2", "v2")
+	if !ass.NoError(err) {
+		return
+	}
+	err = db.Set("k3", "v3")
+	if !ass.NoError(err) {
+		return
+	}
+
+	err = db.Set("k3", "v4")
+	if !ass.NoError(err) {
+		return
+	}
+	err = db.Remove("k2")
+	if !ass.NoError(err) {
+		return
+	}
+	err = db.HashSet("h1", "k1", "v1", "k2", "v2")
+	if !ass.NoError(err) {
+		return
+	}
+	err = db.Remove("h1")
+	if !ass.NoError(err) {
+		return
+	}
+	err = db.HashSet("h2", "k1", "v1", "k2", "v2")
+	if !ass.NoError(err) {
+		return
+	}
+	err = db.HashSet("h2", "k3", "v3")
+	if !ass.NoError(err) {
+		return
+	}
+	err = db.HashDel("h2", "k2")
+	if !ass.NoError(err) {
+		return
+	}
+	_, err = db.ListPush("l1", "a", "b", "c")
+	if !ass.NoError(err) {
+		return
+	}
+	err = db.Remove("l1")
+	if !ass.NoError(err) {
+		return
+	}
+	_, err = db.ListPush("l1", "a", "b", "c")
+	if !ass.NoError(err) {
+		return
+	}
+	_, err = db.ListPop("l1")
+	if !ass.NoError(err) {
+		return
+	}
+
+	// Closing DB
+
+	db.Close()
+
+	db, err = iqdb.Open("test", &iqdb.Options{TCPPort: 7777, HTTPPort: 8888, ShardCount: 100})
+
+	if !ass.NoError(err) {
+		return
+	}
+
+	v, err := db.Get("k1")
+	if !ass.NoError(err) {
+		return
+	}
+
+	if !ass.EqualValues("v1", v) {
+		return
+	}
+
+	v, err = db.Get("k3")
+	if !ass.NoError(err) {
+		return
+	}
+
+	if !ass.EqualValues("v4", v) {
+		return
+	}
+
+	_, err = db.Get("k2")
+	if !ass.Equal(iqdb.ErrKeyNotFound, err) {
+		return
+	}
+
+	_, err = db.HashKeys("h1")
+	if !ass.Equal(iqdb.ErrKeyNotFound, err) {
+		return
+	}
+
+	h, err := db.HashGetAll("h2")
+
+	if !ass.NoError(err) {
+		return
+	}
+
+	if !ass.Equal(map[string]string{"k1": "v1", "k3": "v3"}, h) {
+		return
+	}
+
+	l, err := db.ListRange("l1", 0, 1)
+
+	if !ass.Equal([]string{"a", "b"}, l) {
+		return
+	}
 }
 
 func TestOps(t *testing.T) {
@@ -249,7 +387,7 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		if !ass.EqualValues(c, 4) {
+		if !ass.EqualValues(4, c) {
 			return
 		}
 
@@ -259,7 +397,7 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		if !ass.EqualValues(c, 3) {
+		if !ass.EqualValues(3, c) {
 			return
 		}
 
@@ -269,7 +407,7 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		if !ass.EqualValues(l, "b") {
+		if !ass.EqualValues("b", l) {
 			return
 		}
 
