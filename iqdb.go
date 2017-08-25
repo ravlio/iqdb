@@ -12,7 +12,6 @@ import (
 	"os"
 	"io"
 	"encoding/binary"
-	"fmt"
 )
 
 var ErrKeyNotFound = errors.New("key not found")
@@ -70,6 +69,7 @@ type IqDB struct {
 	// Time callback for back to the future (ttl testing purposes)
 	timeCb     func() time.Time
 	aof        *os.File
+	aofW       io.Writer
 	aofBuf     *bufio.Writer
 	syncTicker *time.Ticker
 	isSyncing  bool
@@ -136,9 +136,12 @@ func Open(fname string, opts *Options) (*IqDB, error) {
 	}
 
 	if !opts.NoAsync && opts.SyncPeriod > 0 {
+		db.aofW = db.aofBuf
 		db.syncTicker = time.NewTicker(opts.SyncPeriod)
 		go db.runSyncer()
 
+	} else {
+		db.aofW = aof
 	}
 
 	return db, nil
@@ -220,21 +223,9 @@ func (iq *IqDB) handleConnection(c net.Conn) {
 	}
 }
 
-// Write operation with key to file/buffer
-func (iq *IqDB) writeKeyOp(op byte, key string, arg ...string) error {
-	var w io.Writer
-
-	if !iq.opts.NoAsync {
-		w = iq.aofBuf
-	} else {
-		w = iq.aof
-	}
-
-	iq.syncMx.Lock()
-	defer iq.syncMx.Unlock()
-
+func (iq *IqDB) writeKeyOp(op byte, key string) error {
 	// op
-	_, err := w.Write([]byte{op})
+	_, err := iq.aofW.Write([]byte{op})
 	if err != nil {
 		return err
 	}
@@ -242,106 +233,170 @@ func (iq *IqDB) writeKeyOp(op byte, key string, arg ...string) error {
 	kb := []byte(key)
 	l := make([]byte, 8)
 	binary.LittleEndian.PutUint64(l, uint64(len(kb)))
-	_, err = w.Write(l)
+	_, err = iq.aofW.Write(l)
 	if err != nil {
 		return err
 	}
-	_, err = w.Write(kb)
+	_, err = iq.aofW.Write(kb)
 	if err != nil {
 		return err
 	}
 
-	switch op {
-	case opSet:
-		var err error
-		var ttl int
+	return nil
+}
 
-		if arg == nil || len(arg) < 2 {
-			ttl = 0
-		} else {
-			ttl, err = strconv.Atoi(arg[1])
-			if err != nil {
-				return err
-			}
-		}
+func (iq *IqDB) writeRemove(key string) error {
+	iq.syncMx.Lock()
+	defer iq.syncMx.Unlock()
 
-		ttlb := make([]byte, 8)
+	return iq.writeKeyOp(opRemove, key)
+}
 
-		binary.LittleEndian.PutUint64(ttlb, uint64(ttl))
-		_, err = w.Write(ttlb)
-		if err != nil {
-			return err
-		}
+func (iq *IqDB) writeListPop(key string) error {
+	iq.syncMx.Lock()
+	defer iq.syncMx.Unlock()
 
-		// value
-		kb := []byte(arg[0])
+	return iq.writeKeyOp(opListPop, key)
+}
+
+func (iq *IqDB) writeSet(key, value string, ttl time.Duration) error {
+	iq.syncMx.Lock()
+	defer iq.syncMx.Unlock()
+
+	err := iq.writeKeyOp(opSet, key)
+	if err != nil {
+		return err
+	}
+
+	ttlb := make([]byte, 8)
+
+	binary.LittleEndian.PutUint64(ttlb, uint64(ttl.Seconds()))
+	_, err = iq.aofW.Write(ttlb)
+	if err != nil {
+		return err
+	}
+	// value
+	kb := []byte(value)
+	l := make([]byte, 8)
+	binary.LittleEndian.PutUint64(l, uint64(len(kb)))
+
+	_, err = iq.aofW.Write(l)
+	if err != nil {
+		return err
+	}
+	_, err = iq.aofW.Write(kb)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (iq *IqDB) writeTTL(key string, ttl time.Duration) error {
+	iq.syncMx.Lock()
+	defer iq.syncMx.Unlock()
+
+	err := iq.writeKeyOp(opTTL, key)
+	if err != nil {
+		return err
+	}
+
+	ttlb := make([]byte, 8)
+
+	binary.LittleEndian.PutUint64(ttlb, uint64(ttl.Seconds()))
+	_, err = iq.aofW.Write(ttlb)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (iq *IqDB) writeListPush(key string, args ...string) error {
+	iq.syncMx.Lock()
+	defer iq.syncMx.Unlock()
+
+	err := iq.writeKeyOp(opListPush, key)
+	if err != nil {
+		return err
+	}
+
+	an := make([]byte, 8)
+	binary.LittleEndian.PutUint64(an, uint64(len(args)))
+	_, err = iq.aofW.Write(an)
+	if err != nil {
+		return err
+	}
+	for _, v := range args {
+		// key
+		kb := []byte(v)
 		l := make([]byte, 8)
 		binary.LittleEndian.PutUint64(l, uint64(len(kb)))
-		_, err = w.Write(l)
+		_, err = iq.aofW.Write(l)
 		if err != nil {
 			return err
 		}
-		_, err = w.Write(kb)
+		_, err = iq.aofW.Write(kb)
 		if err != nil {
 			return err
 		}
+	}
 
-	case opTTL:
-		var err error
-		var ttl int
+	return nil
+}
 
-		if arg == nil {
-			ttl = 0
-		} else {
-			ttl, err = strconv.Atoi(arg[0])
-			if err != nil {
-				return nil
-			}
-		}
+func (iq *IqDB) writeHashSet(key string, args ...string) error {
+	iq.syncMx.Lock()
+	defer iq.syncMx.Unlock()
 
-		ttlb := make([]byte, 8)
+	err := iq.writeKeyOp(opHashSet, key)
+	if err != nil {
+		return err
+	}
 
-		binary.LittleEndian.PutUint64(ttlb, uint64(ttl))
-		_, err = w.Write(ttlb)
-		if err != nil {
-			return err
-		}
-	case opListPush:
-	case opHashSet:
-
-		an := make([]byte, 8)
-		binary.LittleEndian.PutUint64(an, uint64(len(arg)))
-		_, err = w.Write(an)
-		if err != nil {
-			return err
-		}
-		for _, v := range arg {
-			// key
-			kb := []byte(v)
-			l := make([]byte, 8)
-			binary.LittleEndian.PutUint64(l, uint64(len(kb)))
-			_, err = w.Write(l)
-			if err != nil {
-				return err
-			}
-			_, err = w.Write(kb)
-			if err != nil {
-				return err
-			}
-		}
-	case opHashDel:
-		// field
-		kb := []byte(arg[0])
+	an := make([]byte, 8)
+	binary.LittleEndian.PutUint64(an, uint64(len(args)))
+	_, err = iq.aofW.Write(an)
+	if err != nil {
+		return err
+	}
+	for _, v := range args {
+		// field or value
+		kb := []byte(v)
 		l := make([]byte, 8)
 		binary.LittleEndian.PutUint64(l, uint64(len(kb)))
-		_, err = w.Write(l)
+		_, err = iq.aofW.Write(l)
 		if err != nil {
 			return err
 		}
-		_, err = w.Write(kb)
+		_, err = iq.aofW.Write(kb)
 		if err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (iq *IqDB) writeHashDel(key, f string) error {
+	iq.syncMx.Lock()
+	defer iq.syncMx.Unlock()
+
+	err := iq.writeKeyOp(opHashDel, key)
+	if err != nil {
+		return err
+	}
+
+	// field
+	kb := []byte(f)
+	l := make([]byte, 8)
+	binary.LittleEndian.PutUint64(l, uint64(len(kb)))
+	_, err = iq.aofW.Write(l)
+	if err != nil {
+		return err
+	}
+	_, err = iq.aofW.Write(kb)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -393,7 +448,7 @@ func (iq *IqDB) readAOF() error {
 			if err != nil {
 				return err
 			}
-			println("set", "key", key, "val", val, "ttl", ttl)
+			//println("set", "key", key, "val", val, "ttl", ttl)
 
 			err = iq.set(key, val, time.Duration(ttl)*time.Second, false)
 			if err != nil {
@@ -405,7 +460,7 @@ func (iq *IqDB) readAOF() error {
 				return err
 			}
 
-			println("remove", "key", key)
+			//println("remove", "key", key)
 			err = iq.remove(key, false)
 			if err != nil {
 				return err
@@ -420,7 +475,7 @@ func (iq *IqDB) readAOF() error {
 				return err
 			}
 
-			println("ttl", "key", key, "ttl", ttl)
+			//println("ttl", "key", key, "ttl", ttl)
 
 			err = iq._ttl(key, time.Duration(ttl)*time.Second, false)
 			if err != nil {
@@ -446,7 +501,7 @@ func (iq *IqDB) readAOF() error {
 				vals[i] = v
 			}
 
-			println("listPush", "key", key, "vals", fmt.Sprintf("%+v", vals))
+			//println("listPush", "key", key, "vals", fmt.Sprintf("%+v", vals))
 
 			_, err = iq.listPush(key, vals, false)
 			if err != nil {
@@ -458,7 +513,7 @@ func (iq *IqDB) readAOF() error {
 				return err
 			}
 
-			println("listPop", "key", key)
+			//println("listPop", "key", key)
 
 			_, err = iq.listPop(key, false)
 			if err != nil {
@@ -475,7 +530,7 @@ func (iq *IqDB) readAOF() error {
 				return err
 			}
 
-			println("hashDel", "key", key, "field", field)
+			//println("hashDel", "key", key, "field", field)
 			err = iq.hashDel(key, field, false)
 			if err != nil {
 				return err
@@ -492,7 +547,7 @@ func (iq *IqDB) readAOF() error {
 			}
 
 			vals := make(map[string]string, int(n))
-			for i := 0; i < int(n); i++ {
+			for i := 0; i < int(n/2); i++ {
 				f, err := readString(rdr)
 				if err != nil {
 					return err
@@ -505,7 +560,7 @@ func (iq *IqDB) readAOF() error {
 				vals[f] = v
 			}
 
-			println("hashSet", "key", key, "fields", fmt.Sprintf("%+v", vals))
+			//println("hashSet", "key", key, "fields", fmt.Sprintf("%+v", vals))
 
 			err = iq.hashSet(key, vals, false)
 			if err != nil {
@@ -536,7 +591,7 @@ func readBytes(rdr io.Reader) ([]byte, error) {
 		return nil, err
 	}
 
-	//println(binary.LittleEndian.Uint64(l))
+	println(binary.LittleEndian.Uint64(l))
 	b := make([]byte, binary.LittleEndian.Uint64(l))
 
 	_, err = rdr.Read(b)

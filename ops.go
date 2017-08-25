@@ -3,7 +3,6 @@ package iqdb
 import (
 	"time"
 	"sync"
-	"strconv"
 )
 
 type Client interface {
@@ -49,8 +48,11 @@ func (iq *IqDB) Set(key, value string, ttl ...time.Duration) error {
 	}
 
 	err := iq.set(key, value, t, true)
+	if err != nil {
+		return err
+	}
 
-	err = iq.writeKeyOp(opSet, key, value, strconv.Itoa(int(t.Seconds())))
+	err = iq.writeSet(key, value, t)
 
 	return err
 }
@@ -79,7 +81,7 @@ func (iq *IqDB) set(key, value string, ttl time.Duration, lock bool) error {
 func (iq *IqDB) Remove(key string) error {
 	err := iq.remove(key, true)
 
-	err = iq.writeKeyOp(opRemove, key)
+	err = iq.writeRemove(key)
 
 	return err
 }
@@ -108,7 +110,7 @@ func (iq *IqDB) removeFromHash(key string) error {
 func (iq *IqDB) TTL(key string, ttl time.Duration) error {
 	err := iq._ttl(key, ttl, true)
 
-	err = iq.writeKeyOp(opTTL, key, strconv.Itoa(int(ttl.Seconds())))
+	err = iq.writeTTL(key, ttl)
 
 	return err
 }
@@ -188,7 +190,7 @@ func (iq *IqDB) ListIndex(key string, index int) (string, error) {
 func (iq *IqDB) ListPush(key string, value ...string) (int, error) {
 	l, err := iq.listPush(key, value, true)
 
-	err = iq.writeKeyOp(opListPush, key, value...)
+	err = iq.writeListPush(key, value...)
 
 	return l, err
 }
@@ -220,11 +222,11 @@ func (iq *IqDB) listPush(key string, value []string, lock bool) (int, error) {
 func (iq *IqDB) ListPop(key string) (int, error) {
 	l, err := iq.listPop(key, true)
 
-	if err!=nil {
+	if err != nil {
 		return 0, err
 	}
 
-	err = iq.writeKeyOp(opListPop, key)
+	err = iq.writeListPop(key)
 
 	return l, err
 }
@@ -330,7 +332,8 @@ func (iq *IqDB) HashDel(key string, field string) error {
 		return err
 	}
 
-	err = iq.writeKeyOp(opHashDel, key, field)
+
+	err = iq.writeHashDel(key, field)
 
 	return err
 }
@@ -369,7 +372,7 @@ func (iq *IqDB) HashSet(key string, args ...string) error {
 		return err
 	}
 
-	err = iq.writeKeyOp(opHashSet, key, args...)
+	err = iq.writeHashSet(key, args...)
 
 	return err
 }
@@ -389,8 +392,8 @@ func (iq *IqDB) hashSet(key string, kv map[string]string, lock bool) error {
 		h = nh.hash
 	}
 
-	for k,v:=range kv {
-		h.hash.Store(k,v)
+	for k, v := range kv {
+		h.hash.Store(k, v)
 	}
 
 	return nil

@@ -6,6 +6,7 @@ import (
 	"os"
 	"github.com/stretchr/testify/assert"
 	"time"
+	"strconv"
 )
 
 var db *iqdb.IqDB
@@ -15,7 +16,7 @@ func TestMain(m *testing.M) {
 
 	// Cleanup test db
 	if _, err := os.Stat("test"); err == nil {
-		os.Remove("test")
+		//os.Remove("test")
 	}
 
 	db, err = iqdb.Open("test", &iqdb.Options{TCPPort: 7777, HTTPPort: 8888, ShardCount: 100})
@@ -33,7 +34,7 @@ func TestMain(m *testing.M) {
 	}
 
 	if _, err := os.Stat("test"); err == nil {
-		os.Remove("test")
+		//os.Remove("test")
 	} else {
 		panic("no db file!")
 	}
@@ -519,4 +520,14 @@ func TestOps(t *testing.T) {
 		return
 	}
 
+}
+
+func Benchmark1Set(b *testing.B) {
+	var i = 0
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			db.Set(strconv.Itoa(i), strconv.Itoa(i), time.Second)
+			i++
+		}
+	})
 }
