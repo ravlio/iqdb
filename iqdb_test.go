@@ -574,19 +574,7 @@ func TestTCP(t *testing.T) {
 }
 
 func TestOps(t *testing.T) {
-	/*t.Run("direct connect", func(t *testing.T) {
-		testOps(t, direct)
-
-	})
-
-	if t.Failed() {
-		return
-	}*/
-
-	t.Run("Redis protocol", func(t *testing.T) {
-		testOps(t, tcp)
-
-	})
+	testOps(t, tcp)
 
 	if t.Failed() {
 		return
