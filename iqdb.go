@@ -1,17 +1,18 @@
 package iqdb
 
 import (
-	"net"
-	"strconv"
+	"bufio"
+	"encoding/binary"
+	"errors"
 	"github.com/ravlio/iqdb/redis"
 	log "github.com/sirupsen/logrus"
-	"bufio"
-	"errors"
+	"io"
+	"net"
+	"os"
+	"strconv"
 	"sync"
 	"time"
-	"os"
-	"io"
-	"encoding/binary"
+	//"fmt"
 )
 
 var ErrKeyNotFound = errors.New("key not found")
@@ -116,7 +117,6 @@ func Open(fname string, opts *Options) (*IqDB, error) {
 		distmap: NewDistmap(opts.ShardCount),
 		errch:   make(chan error),
 		syncMx:  &sync.Mutex{},
-
 	}
 
 	db.ttl = NewTTLTree(db.removeFromHash)
@@ -147,6 +147,24 @@ func Open(fname string, opts *Options) (*IqDB, error) {
 	return db, nil
 }
 
+func MakeTCPClient(addr string) (Client, error) {
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+
+	tcp := &tcp{
+		r: redis.NewReader(bufio.NewReader(c)),
+		w: redis.NewWriter(c),
+	}
+
+	return tcp, nil
+}
+
+func MakeHTTPClient() Client {
+	return &http{}
+}
+
 var timeFunc = func() time.Time {
 	return time.Now()
 }
@@ -173,6 +191,12 @@ func (iq IqDB) Close() error {
 		iq.flushAOFBuffer()
 	}
 
+	if iq.opts.TCPPort > 0 {
+		err := iq.ln.Close()
+		if err != nil {
+			return err
+		}
+	}
 	return iq.aof.Close()
 }
 
@@ -209,13 +233,328 @@ func (iq *IqDB) handleConnection(c net.Conn) {
 	writer := redis.NewWriter(c)
 
 	for {
-		// TODO make debug info
-		_, err := reader.Read()
-		if err != nil {
-			log.Error(err)
-			return
+		msg, err := reader.Read()
+
+		switch msg.Type {
+		case redis.TypeArray:
+			switch msg.Arr[0].Type {
+			case redis.TypeBulk:
+				switch string(msg.Arr[0].Bulk) {
+				case "SET":
+					if len(msg.Arr) < 3 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+					val := string(msg.Arr[2].Bulk)
+
+					var ttl time.Duration
+					if len(msg.Arr) == 4 {
+						ttli, err := strconv.Atoi(string(msg.Arr[3].Bulk))
+						ttl = time.Duration(ttli)
+						if err != nil {
+							err = writer.Write(redis.ErrWrongTTL)
+							continue
+						}
+					}
+
+					err = iq.Set(key, val, ttl)
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write("OK")
+					continue
+
+				case "GET":
+					if len(msg.Arr) < 2 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+
+					v, err := iq.Get(key)
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write(v)
+					continue
+				case "DEL":
+					if len(msg.Arr) < 1 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+
+					err := iq.Remove(key)
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write("OK")
+					continue
+
+				case "TTL":
+					if len(msg.Arr) < 2 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+
+					var ttl time.Duration
+					ttli, err := strconv.Atoi(string(msg.Arr[2].Bulk))
+					ttl = time.Duration(ttli)
+					if err != nil {
+						err = writer.Write(redis.ErrWrongTTL)
+						continue
+					}
+
+					err = iq.TTL(key, ttl)
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write("OK")
+					continue
+
+				case "HGET":
+					if len(msg.Arr) < 2 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+					field := string(msg.Arr[2].Bulk)
+
+					v, err := iq.HashGet(key, field)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write(v)
+					continue
+
+				case "HSET":
+					if len(msg.Arr) < 3 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+					fields := make([]string, 0)
+
+					for _, v := range msg.Arr[2:] {
+						fields = append(fields, string(v.Bulk))
+					}
+
+					err := iq.HashSet(key, fields...)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write("OK")
+					continue
+
+				case "HGETALL":
+					if len(msg.Arr) < 1 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+
+					v, err := iq.HashGetAll(key)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					r := make([]string, len(v)*2)
+
+					i := 0
+					for k, a := range v {
+						r[i] = k
+						r[i+1] = a
+						i += 2
+					}
+
+					writer.WriteStringSlice(r)
+					continue
+
+				case "HDEL":
+					if len(msg.Arr) < 3 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+					field := string(msg.Arr[2].Bulk)
+
+					err := iq.HashDel(key, field)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write("OK")
+					continue
+
+				case "HKEYS":
+					if len(msg.Arr) < 1 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+
+					v, err := iq.HashKeys(key)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.WriteStringSlice(v)
+					continue
+
+				case "LLEN":
+					if len(msg.Arr) < 2 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+
+					v, err := iq.ListLen(key)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write(v)
+					continue
+
+				case "LINDEX":
+					if len(msg.Arr) < 2 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+					index, err := strconv.Atoi(string(msg.Arr[2].Bulk))
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					v, err := iq.ListIndex(key, index)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write(v)
+					continue
+
+				case "LPOP":
+					if len(msg.Arr) < 2 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					v, err := iq.ListPop(key)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write(v)
+					continue
+
+				case "LRANGE":
+					if len(msg.Arr) < 4 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+					from, err := strconv.Atoi(string(msg.Arr[2].Bulk))
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					to, err := strconv.Atoi(string(msg.Arr[3].Bulk))
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					v, err := iq.ListRange(key, from, to)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.WriteStringSlice(v)
+					continue
+
+				case "LPUSH":
+					if len(msg.Arr) < 3 {
+						err = writer.Write(redis.ErrWrongArgNum)
+						continue
+					}
+
+					key := string(msg.Arr[1].Bulk)
+					fields := make([]string, 0)
+
+					for _, v := range msg.Arr[2:] {
+						fields = append(fields, string(v.Bulk))
+					}
+
+					i, err := iq.ListPush(key, fields...)
+
+					if err != nil {
+						writer.Write(err)
+						continue
+					}
+
+					writer.Write(i)
+					continue
+				}
+			}
 		}
-		err = writer.Write(errors.New("sdfdsf"))
+
+		err = writer.Write(redis.ErrUnknownParseError)
 		if err != nil {
 			log.Error(err)
 			return
@@ -422,7 +761,7 @@ func (iq *IqDB) readAOF() error {
 	for {
 		op := make([]byte, 1)
 
-		n, err := rdr.Read(op)
+		n, err := io.ReadFull(rdr, op)
 
 		if err != nil && err != io.EOF {
 			return err
@@ -586,16 +925,17 @@ func readString(rdr io.Reader) (string, error) {
 func readBytes(rdr io.Reader) ([]byte, error) {
 	var l = make([]byte, 8)
 
-	_, err := rdr.Read(l)
+	_, err := io.ReadFull(rdr, l)
+	//_, err := rdr.Read(l)
 	if err != nil {
 		return nil, err
 	}
 
-	println(binary.LittleEndian.Uint64(l))
+	//print("len ", binary.LittleEndian.Uint64(l), " ")
 	b := make([]byte, binary.LittleEndian.Uint64(l))
 
-	_, err = rdr.Read(b)
-	//println(string(b))
+	_, err = io.ReadFull(rdr, b)
+	//println("v", string(b))
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +945,7 @@ func readBytes(rdr io.Reader) ([]byte, error) {
 
 func readUint64(rdr io.Reader) (uint64, error) {
 	i := make([]byte, 8)
-	_, err := rdr.Read(i)
+	_, err := io.ReadFull(rdr, i)
 	if err != nil {
 		return 0, err
 	}

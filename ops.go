@@ -1,27 +1,26 @@
 package iqdb
 
 import (
-	"time"
 	"sync"
+	"time"
 )
 
 type Client interface {
 	Get(key string) (string, error)
-	Set(key string, ttl int) error
+	Set(key, value string, ttl ...time.Duration) error
 	Remove(key string) error
-	TTL(key string, ttl int) error
-	Keys() ([]string, error)
+	TTL(key string, ttl time.Duration) error
+	Keys() chan<- string
 	ListLen(key string) (int, error)
 	ListIndex(key string, index int) (string, error)
 	ListPush(key string, value ...string) (int, error)
 	ListPop(key string) (int, error)
 	ListRange(key string, from, to int) ([]string, error)
-	HashLen(key string) (int, error)
 	HashGet(key string, field string) (string, error)
 	HashGetAll(key string) (map[string]string, error)
 	HashKeys(key string) ([]string, error)
-	HashDel(key string, field ...string) (int, error)
-	HashSet(key string, field int) (string, error)
+	HashDel(key string, field string) error
+	HashSet(key string, args ...string) error
 }
 
 // General KV
@@ -246,11 +245,11 @@ func (iq *IqDB) listPop(key string, lock bool) (int, error) {
 		return 0, nil
 	}
 
-	v.list = v.list[0:l-1]
+	v.list = v.list[0 : l-1]
 
 	return len(v.list), nil
-
 }
+
 func (iq *IqDB) ListRange(key string, from, to int) ([]string, error) {
 	v, err := iq.list(key)
 
@@ -262,7 +261,7 @@ func (iq *IqDB) ListRange(key string, from, to int) ([]string, error) {
 		return nil, ErrListOutOfBounds
 	}
 
-	return v.list[from:to+1], nil
+	return v.list[from : to+1], nil
 }
 
 // Hashes
@@ -331,7 +330,6 @@ func (iq *IqDB) HashDel(key string, field string) error {
 	if err != nil {
 		return err
 	}
-
 
 	err = iq.writeHashDel(key, field)
 

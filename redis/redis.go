@@ -1,6 +1,12 @@
 package redis
 
+import "errors"
+
 type MessageType string
+
+var ErrWrongArgNum = errors.New("Wrong arguments number")
+var ErrWrongTTL = errors.New("Wrong TTL")
+var ErrUnknownParseError = errors.New("Unknown parse error")
 
 const (
 	TypeString  = "+"

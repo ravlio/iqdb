@@ -3,27 +3,59 @@ package iqdb_test
 import "testing"
 import "github.com/ravlio/iqdb"
 import (
-	"os"
 	"github.com/stretchr/testify/assert"
-	"time"
+	"os"
 	"strconv"
+	"time"
 )
 
 var db *iqdb.IqDB
+var direct iqdb.Client
+var tcp iqdb.Client
+var http iqdb.Client
 
 func TestMain(m *testing.M) {
 	var err error
 
 	// Cleanup test db
 	if _, err := os.Stat("test"); err == nil {
-		//os.Remove("test")
+		os.Remove("test")
 	}
 
+	// Open new db or use existing one
 	db, err = iqdb.Open("test", &iqdb.Options{TCPPort: 7777, HTTPPort: 8888, ShardCount: 100})
 
 	if err != nil {
 		panic(err)
 	}
+
+	// Start servers
+	// Additional goroutine is needed to allow make servers and clients in same time
+	go func() {
+		panic(db.Start())
+	}()
+
+	if err != nil {
+		panic(err)
+	}
+
+	// Give it a chance to start listen connections before client will call
+	time.Sleep(time.Second)
+
+	// conversion from struct to Client interface
+	var i interface{} = db
+
+	direct = i.(iqdb.Client)
+
+	tcp, err = iqdb.MakeTCPClient(":7777")
+	if err != nil {
+		panic(err)
+	}
+
+	/*http, err = iqdb.MakeHTTPClient(":8888")
+	if err != nil {
+		panic(err)
+	}*/
 
 	c := m.Run()
 
@@ -34,7 +66,7 @@ func TestMain(m *testing.M) {
 	}
 
 	if _, err := os.Stat("test"); err == nil {
-		//os.Remove("test")
+		os.Remove("test")
 	} else {
 		panic("no db file!")
 	}
@@ -160,25 +192,25 @@ func TestAOF(t *testing.T) {
 	}
 }
 
-func TestOps(t *testing.T) {
+func testOps(t *testing.T, cl iqdb.Client) {
 	var err error
 
 	ass := assert.New(t)
 
 	t.Run("Standard KV", func(t *testing.T) {
-		_, err = db.Get("unexisting")
+		_, err = cl.Get("unexisting")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		err = db.Set("k", "")
+		err = cl.Set("k", "")
 
 		if !ass.NoError(err) {
 			return
 		}
 
-		res, err := db.Get("k")
+		res, err := cl.Get("k")
 
 		if !ass.NoError(err) {
 			return
@@ -188,13 +220,13 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		err = db.Set("k", "val2")
+		err = cl.Set("k", "val2")
 
 		if !ass.NoError(err) {
 			return
 		}
 
-		res, err = db.Get("k")
+		res, err = cl.Get("k")
 
 		if !ass.NoError(err) {
 			return
@@ -204,13 +236,13 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		err = db.Set("k2", "str1\n\rstr2")
+		err = cl.Set("k2", "str1\n\rstr2")
 
 		if !ass.NoError(err) {
 			return
 		}
 
-		res, err = db.Get("k2")
+		res, err = cl.Get("k2")
 
 		if !ass.NoError(err) {
 			return
@@ -220,25 +252,25 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		err = db.Remove("k2")
+		err = cl.Remove("k2")
 
 		if !ass.NoError(err) {
 			return
 		}
 
-		res, err = db.Get("k2")
+		res, err = cl.Get("k2")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		err = db.Set("ttl", "val", time.Minute)
+		err = cl.Set("ttl", "val", time.Minute)
 
 		if !ass.NoError(err) {
 			return
 		}
 
-		res, err = db.Get("ttl")
+		res, err = cl.Get("ttl")
 
 		if !ass.NoError(err) {
 			return
@@ -254,99 +286,99 @@ func TestOps(t *testing.T) {
 	}
 
 	t.Run("Hashes", func(t *testing.T) {
-		_, err := db.HashGetAll("unexisting")
+		_, err := cl.HashGetAll("unexisting")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		_, err = db.HashGet("unexisting", "213")
+		_, err = cl.HashGet("unexisting", "213")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		err = db.HashDel("unexisting", "123")
+		err = cl.HashDel("unexisting", "123")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		_, err = db.HashKeys("unexisting")
+		_, err = cl.HashKeys("unexisting")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		err = db.HashSet("hash", "f1", "1")
+		err = cl.HashSet("hash", "f1", "1")
 
 		if !ass.NoError(err) {
 			return
 		}
 
-		h, err := db.HashGetAll("hash")
+		h, err := cl.HashGetAll("hash")
 
 		if !ass.Equal(map[string]string{"f1": "1"}, h) {
 			return
 		}
 
-		v, err := db.HashGet("hash", "f1")
+		v, err := cl.HashGet("hash", "f1")
 
 		if !ass.Equal(v, "1") {
 			return
 		}
 
-		err = db.HashDel("hash", "unex")
+		err = cl.HashDel("hash", "unex")
 
 		/*
-		if !ass.Equal(iqdb.ErrHashKeyNotFound, err) {
-			return
-		}
+			if !ass.Equal(iqdb.ErrHashKeyNotFound, err) {
+				return
+			}
 		*/
 
-		keys, err := db.HashKeys("hash")
+		keys, err := cl.HashKeys("hash")
 
 		if !ass.Equal([]string{"f1"}, keys) {
 			return
 		}
 
-		err = db.HashDel("hash", "f1")
+		err = cl.HashDel("hash", "f1")
 
 		if !ass.NoError(err) {
 			return
 		}
 
-		err = db.HashSet("hash", "k1")
+		err = cl.HashSet("hash", "k1")
 
 		if !ass.Equal(iqdb.ErrHashKeyValueMismatch, err) {
 			return
 		}
 
-		err = db.HashSet("hash", "k1", "v1", "k2", "v2")
+		err = cl.HashSet("hash", "k1", "v1", "k2", "v2")
 
 		if !ass.NoError(err) {
 			return
 		}
 
-		err = db.HashSet("hash", "k3", "v3")
+		err = cl.HashSet("hash", "k3", "v3")
 
 		if !ass.NoError(err) {
 			return
 		}
 
-		h, err = db.HashGetAll("hash")
+		h, err = cl.HashGetAll("hash")
 
 		if !ass.Equal(map[string]string{"k1": "v1", "k2": "v2", "k3": "v3"}, h) {
 			return
 		}
 
-		err = db.Remove("hash")
+		err = cl.Remove("hash")
 
 		if !ass.NoError(err) {
 			return
 		}
 
-		_, err = db.HashGetAll("hash")
+		_, err = cl.HashGetAll("hash")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
@@ -358,31 +390,31 @@ func TestOps(t *testing.T) {
 	}
 
 	t.Run("Lists", func(t *testing.T) {
-		_, err := db.ListLen("unexisting")
+		_, err := cl.ListLen("unexisting")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		_, err = db.ListIndex("unexisting", 1)
+		_, err = cl.ListIndex("unexisting", 1)
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		_, err = db.ListPop("unexisting")
+		_, err = cl.ListPop("unexisting")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		_, err = db.ListRange("unexisting", 0, 10)
+		_, err = cl.ListRange("unexisting", 0, 10)
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		c, err := db.ListPush("list", "a", "b", "c", "d")
+		c, err := cl.ListPush("list", "a", "b", "c", "d")
 
 		if !ass.NoError(err) {
 			return
@@ -392,7 +424,7 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		c, err = db.ListPop("list")
+		c, err = cl.ListPop("list")
 
 		if !ass.NoError(err) {
 			return
@@ -402,7 +434,7 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		l, err := db.ListIndex("list", 1)
+		l, err := cl.ListIndex("list", 1)
 
 		if !ass.NoError(err) {
 			return
@@ -412,19 +444,19 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		l, err = db.ListIndex("list", 10)
+		l, err = cl.ListIndex("list", 10)
 
 		if !ass.Equal(iqdb.ErrListIndexError, err) {
 			return
 		}
 
-		_, err = db.ListRange("list", 0, 10)
+		_, err = cl.ListRange("list", 0, 10)
 
 		if !ass.Equal(iqdb.ErrListOutOfBounds, err) {
 			return
 		}
 
-		lr, err := db.ListRange("list", 0, 2)
+		lr, err := cl.ListRange("list", 0, 2)
 
 		if !ass.Equal([]string{"a", "b", "c"}, lr) {
 			return
@@ -433,11 +465,11 @@ func TestOps(t *testing.T) {
 	})
 
 	t.Run("TTL", func(t *testing.T) {
-		db.Set("nottl", "test1")
-		db.Set("ttl1sec", "test2", time.Second*1)
-		db.Set("ttl10sec", "test3", time.Second*10)
+		cl.Set("nottl", "test1")
+		cl.Set("ttl1sec", "test2", time.Second*1)
+		cl.Set("ttl10sec", "test3", time.Second*10)
 
-		v, err := db.Get("nottl")
+		v, err := cl.Get("nottl")
 
 		if !ass.NoError(err) {
 			return
@@ -446,7 +478,7 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		v, err = db.Get("ttl1sec")
+		v, err = cl.Get("ttl1sec")
 
 		if !ass.NoError(err) {
 			return
@@ -455,7 +487,7 @@ func TestOps(t *testing.T) {
 			return
 		}
 
-		v, err = db.Get("ttl10sec")
+		v, err = cl.Get("ttl10sec")
 
 		if !ass.NoError(err) {
 			return
@@ -471,13 +503,13 @@ func TestOps(t *testing.T) {
 		})
 
 		db.ForeTTLRecheck()
-		_, err = db.Get("ttl1sec")
+		_, err = cl.Get("ttl1sec")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		v, err = db.Get("ttl10sec")
+		v, err = cl.Get("ttl10sec")
 
 		if !ass.NoError(err) {
 			return
@@ -494,13 +526,13 @@ func TestOps(t *testing.T) {
 
 		db.ForeTTLRecheck()
 
-		_, err = db.Get("ttl10sec")
+		_, err = cl.Get("ttl10sec")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
-		db.TTL("nottl", time.Second)
+		cl.TTL("nottl", time.Second)
 
 		timeShift = timeShift + time.Second*2
 
@@ -509,13 +541,53 @@ func TestOps(t *testing.T) {
 		})
 		db.ForeTTLRecheck()
 
-		_, err = db.Get("nottl")
+		_, err = cl.Get("nottl")
 
 		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 			return
 		}
 
 	})
+	if t.Failed() {
+		return
+	}
+}
+
+func TestTCP(t *testing.T) {
+	var err error
+
+	ass := assert.New(t)
+
+	err = tcp.Set("k", "v", time.Second)
+	if !ass.NoError(err) {
+		return
+	}
+
+	k, err := tcp.Get("k")
+	if !ass.NoError(err) {
+		return
+	}
+
+	if !ass.Equal("v", k) {
+		return
+	}
+}
+
+func TestOps(t *testing.T) {
+	/*t.Run("direct connect", func(t *testing.T) {
+		testOps(t, direct)
+
+	})
+
+	if t.Failed() {
+		return
+	}*/
+
+	t.Run("Redis protocol", func(t *testing.T) {
+		testOps(t, tcp)
+
+	})
+
 	if t.Failed() {
 		return
 	}
@@ -526,8 +598,36 @@ func Benchmark1Set(b *testing.B) {
 	var i = 0
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			db.Set(strconv.Itoa(i), strconv.Itoa(i), time.Second)
+			direct.Set(strconv.Itoa(i), strconv.Itoa(i), time.Second)
 			i++
 		}
 	})
+}
+
+func Benchmark1Get(b *testing.B) {
+	var i = 0
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			db.Get(strconv.Itoa(i))
+			i++
+		}
+	})
+}
+
+func BenchmarkTCP1Set(b *testing.B) {
+	var i = 0
+	for n := 0; n < b.N; n++ {
+		tcp.Set(strconv.Itoa(i), strconv.Itoa(i), time.Second)
+		i++
+
+	}
+}
+
+func BenchmarkTCP1Get(b *testing.B) {
+	var i = 0
+
+	for n := 0; n < b.N; n++ {
+		tcp.Get(strconv.Itoa(i))
+		i++
+	}
 }

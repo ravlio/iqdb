@@ -6,14 +6,16 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+var dbname = flag.String("dbname", "db", "database filename")
 var tcpPort = flag.Int("tcp", 7379, "tcp port")
-var httpPort = flag.Int("http", 8081, "http port")
+
+//var httpPort = flag.Int("http", 8081, "http port")
 
 func main() {
 	log.Info("Starting ...")
-	db, err := iqdb.Open(&iqdb.Options{
-		TCPPort:  *tcpPort,
-		HTTPPort: *httpPort,
+	db, err := iqdb.Open(*dbname, &iqdb.Options{
+		TCPPort: *tcpPort,
+		//HTTPPort: *httpPort,
 	})
 
 	if err != nil {
