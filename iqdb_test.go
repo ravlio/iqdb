@@ -79,79 +79,86 @@ func TestAOF(t *testing.T) {
 
 	ass := assert.New(t)
 
-	err = db.Set("k1", "v1", time.Second*10)
+	// Open new db or use existing one
+	aof, err := iqdb.Open("aof", &iqdb.Options{ShardCount: 100})
+
+	if err != nil {
+		panic(err)
+	}
+
+	err = aof.Set("k1", "v1", time.Second*10)
 	if !ass.NoError(err) {
 		return
 	}
-	err = db.Set("k2", "v2")
+	err = aof.Set("k2", "v2")
 	if !ass.NoError(err) {
 		return
 	}
-	err = db.Set("k3", "v3")
+	err = aof.Set("k3", "v3")
 	if !ass.NoError(err) {
 		return
 	}
 
-	err = db.Set("k3", "v4")
+	err = aof.Set("k3", "v4")
 	if !ass.NoError(err) {
 		return
 	}
-	err = db.Remove("k2")
+	err = aof.Remove("k2")
 	if !ass.NoError(err) {
 		return
 	}
-	err = db.HashSet("h1", "k1", "v1", "k2", "v2")
+	err = aof.HashSet("h1", "k1", "v1", "k2", "v2")
 	if !ass.NoError(err) {
 		return
 	}
-	err = db.Remove("h1")
+	err = aof.Remove("h1")
 	if !ass.NoError(err) {
 		return
 	}
-	err = db.HashSet("h2", "k1", "v1", "k2", "v2")
+	err = aof.HashSet("h2", "k1", "v1", "k2", "v2")
 	if !ass.NoError(err) {
 		return
 	}
-	err = db.HashSet("h2", "k3", "v3")
+	err = aof.HashSet("h2", "k3", "v3")
 	if !ass.NoError(err) {
 		return
 	}
-	err = db.HashDel("h2", "k2")
+	err = aof.HashDel("h2", "k2")
 	if !ass.NoError(err) {
 		return
 	}
-	_, err = db.ListPush("l1", "a", "b", "c")
+	_, err = aof.ListPush("l1", "a", "b", "c")
 	if !ass.NoError(err) {
 		return
 	}
-	err = db.Remove("l1")
+	err = aof.Remove("l1")
 	if !ass.NoError(err) {
 		return
 	}
-	_, err = db.ListPush("l1", "a", "b", "c")
+	_, err = aof.ListPush("l1", "a", "b", "c")
 	if !ass.NoError(err) {
 		return
 	}
-	_, err = db.ListPop("l1")
+	_, err = aof.ListPop("l1")
 	if !ass.NoError(err) {
 		return
 	}
 
 	// Closing DB
 
-	err = db.Close()
+	err = aof.Close()
 
 	if !ass.NoError(err) {
 		return
 	}
 
-	db, err = iqdb.Open("test", &iqdb.Options{TCPPort: 7777, HTTPPort: 8888, ShardCount: 100})
+	aof, err = iqdb.Open("aof", &iqdb.Options{ShardCount: 100})
 
 	if !ass.NoError(err) {
 		return
 	}
 
-	v, err := db.Get("k1")
+	v, err := aof.Get("k1")
 	if !ass.NoError(err) {
 		return
 	}
@@ -160,7 +167,7 @@ func TestAOF(t *testing.T) {
 		return
 	}
 
-	v, err = db.Get("k3")
+	v, err = aof.Get("k3")
 	if !ass.NoError(err) {
 		return
 	}
@@ -169,17 +176,17 @@ func TestAOF(t *testing.T) {
 		return
 	}
 
-	_, err = db.Get("k2")
+	_, err = aof.Get("k2")
 	if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 		return
 	}
 
-	_, err = db.HashKeys("h1")
+	_, err = aof.HashKeys("h1")
 	if !ass.Equal(iqdb.ErrKeyNotFound, err) {
 		return
 	}
 
-	h, err := db.HashGetAll("h2")
+	h, err := aof.HashGetAll("h2")
 
 	if !ass.NoError(err) {
 		return
@@ -189,9 +196,14 @@ func TestAOF(t *testing.T) {
 		return
 	}
 
-	l, err := db.ListRange("l1", 0, 1)
+	l, err := aof.ListRange("l1", 0, 1)
 
 	if !ass.Equal([]string{"a", "b"}, l) {
+		return
+	}
+
+	err = aof.Close()
+	if !ass.NoError(err) {
 		return
 	}
 }
