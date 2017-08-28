@@ -1,7 +1,7 @@
 FROM scratch
 LABEL maintainer "Maxim Bogranov <muravlion@gmail.com>"
 
-COPY iqdb /bin/iqdb
+COPY release/server /bin/iqdb
 
 VOLUME     [ "/iqdb" ]
 WORKDIR    /iqdb

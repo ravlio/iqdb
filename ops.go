@@ -23,7 +23,8 @@ type Client interface {
 	HashSet(key string, args ...string) error
 }
 
-// General KV
+// Get value by key
+// Returns value in string on success and error on failure
 func (iq *IqDB) Get(key string) (string, error) {
 	v, err := iq.distmap.Get(key)
 
@@ -38,7 +39,8 @@ func (iq *IqDB) Get(key string) (string, error) {
 	return v.Value, nil
 }
 
-// General set method. TTL may be optional as it's a slice
+// Set value by key. TTl is optional parameter
+// Returns error on fail
 func (iq *IqDB) Set(key, value string, ttl ...time.Duration) error {
 	var t time.Duration
 
@@ -77,6 +79,8 @@ func (iq *IqDB) set(key, value string, ttl time.Duration, lock bool) error {
 	return nil
 }
 
+// Removes key from storage
+// Returns error on fail
 func (iq *IqDB) Remove(key string) error {
 	err := iq.remove(key, true)
 
@@ -106,6 +110,8 @@ func (iq *IqDB) removeFromHash(key string) error {
 	return nil
 }
 
+// Set TTL on key
+// Returns error on fail
 func (iq *IqDB) TTL(key string, ttl time.Duration) error {
 	err := iq._ttl(key, ttl, true)
 
@@ -131,6 +137,8 @@ func (iq *IqDB) _ttl(key string, ttl time.Duration, lock bool) error {
 	return nil
 }
 
+// Get all keys
+// Returns string channel with keys
 func (iq *IqDB) Keys() chan<- string {
 	return iq.distmap.Range()
 }
@@ -162,6 +170,8 @@ func (iq *IqDB) list(key string) (*list, error) {
 	return v.list, nil
 }
 
+// Get list length
+// Returns items count on success and error on fail
 func (iq *IqDB) ListLen(key string) (int, error) {
 	v, err := iq.list(key)
 
@@ -172,6 +182,8 @@ func (iq *IqDB) ListLen(key string) (int, error) {
 	return len(v.list), nil
 }
 
+// Get list item by its index
+// Returns item on success and error on fail
 func (iq *IqDB) ListIndex(key string, index int) (string, error) {
 	v, err := iq.list(key)
 
@@ -186,6 +198,8 @@ func (iq *IqDB) ListIndex(key string, index int) (string, error) {
 	return v.list[index], nil
 }
 
+// Push item to end of list
+// Returns items count on success and error on fail
 func (iq *IqDB) ListPush(key string, value ...string) (int, error) {
 	l, err := iq.listPush(key, value, true)
 
@@ -218,6 +232,8 @@ func (iq *IqDB) listPush(key string, value []string, lock bool) (int, error) {
 	return len(v.list), nil
 }
 
+// Pop item from end of list
+// Returns items count on success and error on fail
 func (iq *IqDB) ListPop(key string) (int, error) {
 	l, err := iq.listPop(key, true)
 
@@ -250,6 +266,8 @@ func (iq *IqDB) listPop(key string, lock bool) (int, error) {
 	return len(v.list), nil
 }
 
+// Get list items by key with specified index range
+// Returns items slice on success and error on fail
 func (iq *IqDB) ListRange(key string, from, to int) ([]string, error) {
 	v, err := iq.list(key)
 
@@ -279,6 +297,8 @@ func (iq *IqDB) hash(key string) (*hash, error) {
 	return v.hash, nil
 }
 
+// Get hash value by key and field
+// Returns value on success and error on fail
 func (iq *IqDB) HashGet(key string, field string) (string, error) {
 	v, err := iq.hash(key)
 
@@ -293,6 +313,8 @@ func (iq *IqDB) HashGet(key string, field string) (string, error) {
 	return "", ErrHashKeyNotFound
 }
 
+// Get hash fields and values map by key
+// Returns map of fields and values on success and error on fail
 func (iq *IqDB) HashGetAll(key string) (map[string]string, error) {
 	v, err := iq.hash(key)
 
@@ -309,6 +331,8 @@ func (iq *IqDB) HashGetAll(key string) (map[string]string, error) {
 	return ret, nil
 }
 
+// Get hash keys of key
+// Returns string slice of keys on success and error on fail
 func (iq *IqDB) HashKeys(key string) ([]string, error) {
 	v, err := iq.hash(key)
 
@@ -325,6 +349,8 @@ func (iq *IqDB) HashKeys(key string) ([]string, error) {
 	return ret, nil
 }
 
+// Delete field from hash
+// Returns error on fail
 func (iq *IqDB) HashDel(key string, field string) error {
 	err := iq.hashDel(key, field, true)
 	if err != nil {
@@ -353,6 +379,9 @@ func (iq *IqDB) hashDel(key, field string, lock bool) error {
 	return nil
 }
 
+// Set one or more field-value pairs on hash by key
+// Example: HashSet("test","k1","v1","k2","v2")
+// Returns error on fail
 func (iq *IqDB) HashSet(key string, args ...string) error {
 
 	if len(args)%2 != 0 {
