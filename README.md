@@ -1,5 +1,7 @@
 # iqdb
 
+![CircleCI status](https://circleci.com/gh/ravlio/iqdb.png)
+
 fast Key-Value database with unified client interface. Can by used as embedded storage or as standalone TCP/HTTP server.
 
 Documentation: https://godoc.org/github.com/ravlio/iqdb
