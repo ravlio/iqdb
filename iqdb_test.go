@@ -139,7 +139,11 @@ func TestAOF(t *testing.T) {
 
 	// Closing DB
 
-	db.Close()
+	err = db.Close()
+
+	if !ass.NoError(err) {
+		return
+	}
 
 	db, err = iqdb.Open("test", &iqdb.Options{TCPPort: 7777, HTTPPort: 8888, ShardCount: 100})
 
@@ -579,7 +583,6 @@ func TestOps(t *testing.T) {
 	if t.Failed() {
 		return
 	}
-
 }
 
 func Benchmark1Set(b *testing.B) {

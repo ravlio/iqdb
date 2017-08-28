@@ -75,6 +75,7 @@ type IqDB struct {
 	syncTicker *time.Ticker
 	isSyncing  bool
 	syncMx     *sync.Mutex
+	stopc      chan struct{}
 }
 
 // KeyValue entity
@@ -117,6 +118,7 @@ func Open(fname string, opts *Options) (*IqDB, error) {
 		distmap: NewDistmap(opts.ShardCount),
 		errch:   make(chan error),
 		syncMx:  &sync.Mutex{},
+		stopc: make(chan struct{},1),
 	}
 
 	db.ttl = NewTTLTree(db.removeFromHash)
@@ -192,10 +194,13 @@ func (iq IqDB) Close() error {
 	}
 
 	if iq.opts.TCPPort > 0 {
-		err := iq.ln.Close()
+		iq.StopTCP()
+		//iq.ln.Close()
+		// not so fast
+		/*err := iq.ln.Close()
 		if err != nil {
 			return err
-		}
+		}*/
 	}
 	return iq.aof.Close()
 }
@@ -222,10 +227,21 @@ func (iq *IqDB) serveTCP() {
 	for {
 		conn, err := iq.ln.Accept()
 		if err != nil {
-			log.Error("tcp error", err)
+			select {
+			case <-iq.stopc:
+				iq.ln.Close()
+				return
+			default:
+				log.Error("tcp error", err)
+
+			}
 		}
 		go iq.handleConnection(conn)
 	}
+}
+
+func (iq *IqDB) StopTCP() {
+	iq.stopc <- struct{}{}
 }
 
 func (iq *IqDB) handleConnection(c net.Conn) {
