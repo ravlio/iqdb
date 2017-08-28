@@ -38,4 +38,10 @@ func ExampleTCPClient() {
 	if err != nil {
 		panic(err)
 	}
+
+	err = tcp.Set("k", "v")
+
+	if err != nil {
+		panic(err)
+	}
 }
