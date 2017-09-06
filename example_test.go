@@ -14,7 +14,7 @@ func ExampleEmbeddedServer() {
 	}
 
 	// Open new db or use existing one
-	db, err = iqdb.Open("test", &iqdb.Options{TCPPort: 7777, HTTPPort: 8888, ShardCount: 100})
+	db, err = iqdb.Open("test", &iqdb.Options{RedisPort: 7777, HTTPPort: 8888, ShardCount: 100})
 	defer db.Close()
 
 	if err != nil {

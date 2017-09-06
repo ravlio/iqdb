@@ -1,13 +1,14 @@
-package iqdb
+package redis
 
 import (
 	"errors"
 	"github.com/ravlio/iqdb/redis"
 	"strconv"
 	"time"
+	"github.com/ravlio/iqdb"
 )
 
-type tcp struct {
+type client struct {
 	r *redis.Reader
 	w *redis.Writer
 }
@@ -73,18 +74,18 @@ func getFirstBulkAsInt(msg *redis.Message) (int, error) {
 func checkErr(msg *redis.Message) error {
 	if msg.Arr[0].Type == redis.TypeError {
 		switch msg.Arr[0].Err.Error() {
-		case ErrKeyNotFound.Error():
-			return ErrKeyNotFound
-		case ErrKeyTypeError.Error():
-			return ErrKeyTypeError
-		case ErrListIndexError.Error():
-			return ErrListIndexError
-		case ErrListOutOfBounds.Error():
-			return ErrListOutOfBounds
-		case ErrHashKeyNotFound.Error():
-			return ErrHashKeyNotFound
-		case ErrHashKeyValueMismatch.Error():
-			return ErrHashKeyValueMismatch
+		case iqdb.ErrKeyNotFound.Error():
+			return iqdb.ErrKeyNotFound
+		case iqdb.ErrKeyTypeError.Error():
+			return iqdb.ErrKeyTypeError
+		case iqdb.ErrListIndexError.Error():
+			return iqdb.ErrListIndexError
+		case iqdb.ErrListOutOfBounds.Error():
+			return iqdb.ErrListOutOfBounds
+		case iqdb.ErrHashKeyNotFound.Error():
+			return iqdb.ErrHashKeyNotFound
+		case iqdb.ErrHashKeyValueMismatch.Error():
+			return iqdb.ErrHashKeyValueMismatch
 
 		}
 		return errors.New("Unknown error")
@@ -93,7 +94,7 @@ func checkErr(msg *redis.Message) error {
 	return nil
 }
 
-func (tcp *tcp) Get(key string) (string, error) {
+func (tcp *client) Get(key string) (string, error) {
 	tcp.w.Write("GET", key)
 	msg, err := tcp.r.Read()
 	if err != nil {
@@ -107,7 +108,7 @@ func (tcp *tcp) Get(key string) (string, error) {
 	return getFirstBulkAsString(msg)
 }
 
-func (tcp *tcp) Set(key, value string, ttl ...time.Duration) error {
+func (tcp *client) Set(key, value string, ttl ...time.Duration) error {
 	var err error
 	if ttl != nil {
 		err = tcp.w.Write("SET", key, value, ttl[0])
@@ -126,7 +127,7 @@ func (tcp *tcp) Set(key, value string, ttl ...time.Duration) error {
 	return nil
 }
 
-func (tcp *tcp) Remove(key string) error {
+func (tcp *client) Remove(key string) error {
 	err := tcp.w.Write("DEL", key)
 
 	if err != nil {
@@ -141,7 +142,7 @@ func (tcp *tcp) Remove(key string) error {
 	return nil
 }
 
-func (tcp *tcp) TTL(key string, ttl time.Duration) error {
+func (tcp *client) TTL(key string, ttl time.Duration) error {
 	err := tcp.w.Write("TTL", key, ttl)
 
 	if err != nil {
@@ -156,11 +157,11 @@ func (tcp *tcp) TTL(key string, ttl time.Duration) error {
 	return nil
 }
 
-func (tcp *tcp) Keys() chan<- string {
+func (tcp *client) Keys() chan<- string {
 	panic("implement me")
 }
 
-func (tcp *tcp) ListLen(key string) (int, error) {
+func (tcp *client) ListLen(key string) (int, error) {
 	err := tcp.w.Write("LLEN", key)
 
 	if err != nil {
@@ -179,7 +180,7 @@ func (tcp *tcp) ListLen(key string) (int, error) {
 	return getFirstBulkAsInt(m)
 }
 
-func (tcp *tcp) ListIndex(key string, index int) (string, error) {
+func (tcp *client) ListIndex(key string, index int) (string, error) {
 	err := tcp.w.Write("LINDEX", key, index)
 
 	if err != nil {
@@ -197,7 +198,7 @@ func (tcp *tcp) ListIndex(key string, index int) (string, error) {
 	return getFirstBulkAsString(msg)
 }
 
-func (tcp *tcp) ListPush(key string, value ...string) (int, error) {
+func (tcp *client) ListPush(key string, value ...string) (int, error) {
 	ss := make([]string, len(value)+2)
 	ss[0] = "LPUSH"
 	ss[1] = key
@@ -222,7 +223,7 @@ func (tcp *tcp) ListPush(key string, value ...string) (int, error) {
 	return getFirstBulkAsInt(msg)
 }
 
-func (tcp *tcp) ListPop(key string) (int, error) {
+func (tcp *client) ListPop(key string) (int, error) {
 	err := tcp.w.Write("LPOP", key)
 
 	if err != nil {
@@ -241,7 +242,7 @@ func (tcp *tcp) ListPop(key string) (int, error) {
 	return getFirstBulkAsInt(msg)
 }
 
-func (tcp *tcp) ListRange(key string, from, to int) ([]string, error) {
+func (tcp *client) ListRange(key string, from, to int) ([]string, error) {
 	err := tcp.w.Write("LRANGE", key, from, to)
 
 	if err != nil {
@@ -260,7 +261,7 @@ func (tcp *tcp) ListRange(key string, from, to int) ([]string, error) {
 	return getFirstBulkAsStringSlice(msg)
 }
 
-func (tcp *tcp) HashGet(key string, field string) (string, error) {
+func (tcp *client) HashGet(key string, field string) (string, error) {
 	err := tcp.w.Write("HGET", key, field)
 	if err != nil {
 		return "", err
@@ -278,7 +279,7 @@ func (tcp *tcp) HashGet(key string, field string) (string, error) {
 	return getFirstBulkAsString(msg)
 }
 
-func (tcp *tcp) HashGetAll(key string) (map[string]string, error) {
+func (tcp *client) HashGetAll(key string) (map[string]string, error) {
 	err := tcp.w.Write("HGETALL", key)
 	if err != nil {
 		return nil, err
@@ -296,7 +297,7 @@ func (tcp *tcp) HashGetAll(key string) (map[string]string, error) {
 	return getFirstBulkAsStringMap(msg)
 }
 
-func (tcp *tcp) HashKeys(key string) ([]string, error) {
+func (tcp *client) HashKeys(key string) ([]string, error) {
 	err := tcp.w.Write("HKEYS", key)
 	if err != nil {
 		return nil, err
@@ -313,7 +314,7 @@ func (tcp *tcp) HashKeys(key string) ([]string, error) {
 	return getFirstBulkAsStringSlice(msg)
 }
 
-func (tcp *tcp) HashDel(key string, field string) error {
+func (tcp *client) HashDel(key string, field string) error {
 	err := tcp.w.Write("HDEL", key, field)
 
 	if err != nil {
@@ -332,7 +333,7 @@ func (tcp *tcp) HashDel(key string, field string) error {
 	return nil
 }
 
-func (tcp *tcp) HashSet(key string, args ...string) error {
+func (tcp *client) HashSet(key string, args ...string) error {
 	ss := make([]string, len(args)+2)
 	ss[0] = "HSET"
 	ss[1] = key

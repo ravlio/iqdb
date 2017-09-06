@@ -1,55 +1,39 @@
-package redis
+package tcp
 
 import (
-	"errors"
 	"github.com/ravlio/iqdb"
 	"net"
 	"bufio"
 	"time"
 	"strconv"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/fatih/pool.v2"
 )
-
-type MessageType string
-
-var ErrWrongArgNum = errors.New("Wrong arguments number")
-var ErrWrongTTL = errors.New("Wrong TTL")
-var ErrUnknownParseError = errors.New("Unknown parse error")
-
-const (
-	TypeString  = "+"
-	TypeError   = "-"
-	TypeInteger = ":"
-	TypeArray   = "*"
-	TypeBulk    = "$"
-)
-
-// Redis protocol format
-type Message struct {
-	Type   string
-	String string
-	Int    int64
-	Arr    []*Message
-	Bulk   []byte
-	Err    error
-}
 
 type Redis struct {
 	iq    *iqdb.IqDB
 	ln    net.Listener
+	pool
 	stopc chan struct{}
 }
 
+type cl struct {
+	p pool.Pool
+}
 
 func NewClient(addr string) (iqdb.Client, error) {
-	c, err := net.Dial("client", addr)
+	factory := func() (net.Conn, error) {
+		return net.Dial("tcp", addr)
+	}
+
+	p, err := pool.NewChannelPool(5, 30, factory)
+
 	if err != nil {
 		return nil, err
 	}
 
-	cl := &client{
-		r: NewReader(bufio.NewReader(c)),
-		w: NewWriter(c),
+	tcp := &cl{
+		p: p,
 	}
 
 	return cl, nil
@@ -67,7 +51,7 @@ func (r *Redis) Start() error {
 
 	log.Info("Starting TCP server ...")
 
-	r.ln, err = net.Listen("client", ":"+strconv.Itoa(r.iq.Opts.RedisPort))
+	r.ln, err = net.Listen("tcp", ":"+strconv.Itoa(r.iq.Opts.RedisPort))
 	if err != nil {
 		r.iq.Errch <- err
 	}
@@ -82,7 +66,7 @@ func (r *Redis) Start() error {
 				r.ln.Close()
 				return nil
 			default:
-				log.Error("client error", err)
+				log.Error("tcp error", err)
 
 			}
 		}
@@ -90,7 +74,7 @@ func (r *Redis) Start() error {
 	}
 }
 
-func (r *Redis) Stop() {
+func (r *Redis) Stop() error {
 	r.stopc <- struct{}{}
 
 }

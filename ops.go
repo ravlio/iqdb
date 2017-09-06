@@ -72,8 +72,8 @@ func (iq *IqDB) set(key, value string, ttl time.Duration, lock bool) error {
 
 	if ttl > 0 {
 		iq.ttl.ReplaceOrInsert(NewttlTreeItem(key, ttl))
-	} else if iq.opts.TTL > 0 {
-		iq.ttl.ReplaceOrInsert(NewttlTreeItem(key, iq.opts.TTL))
+	} else if iq.Opts.TTL > 0 {
+		iq.ttl.ReplaceOrInsert(NewttlTreeItem(key, iq.Opts.TTL))
 	}
 
 	return nil
@@ -104,6 +104,7 @@ func (iq *IqDB) remove(key string, lock bool) error {
 
 	return nil
 }
+
 func (iq *IqDB) removeFromHash(key string) error {
 	iq.distmap.Remove(key)
 
