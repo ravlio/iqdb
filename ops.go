@@ -3,6 +3,7 @@ package iqdb
 import (
 	"sync"
 	"time"
+	proto "github.com/ravlio/iqdb/protocol"
 )
 
 type Client interface {
@@ -53,7 +54,7 @@ func (iq *IqDB) Set(key, value string, ttl ...time.Duration) error {
 		return err
 	}
 
-	err = iq.writeSet(key, value, t)
+	err = proto.WriteSet(iq.aofW, key, value, t)
 
 	return err
 }
@@ -82,14 +83,14 @@ func (iq *IqDB) set(key, value string, ttl time.Duration, lock bool) error {
 // Removes key from storage
 // Returns error on fail
 func (iq *IqDB) Remove(key string) error {
-	err := iq.remove(key, true)
+	err := iq._remove(key, true)
 
-	err = iq.writeRemove(key)
+	err = proto.WriteRemove(iq.aofW, key)
 
 	return err
 }
 
-func (iq *IqDB) remove(key string, lock bool) error {
+func (iq *IqDB) _remove(key string, lock bool) error {
 	v, err := iq.distmap.Get(key)
 
 	if err != nil {
@@ -105,7 +106,7 @@ func (iq *IqDB) remove(key string, lock bool) error {
 	return nil
 }
 
-func (iq *IqDB) removeFromHash(key string) error {
+func (iq *IqDB) _removeFromHash(key string) error {
 	iq.distmap.Remove(key)
 
 	return nil
@@ -116,7 +117,7 @@ func (iq *IqDB) removeFromHash(key string) error {
 func (iq *IqDB) TTL(key string, ttl time.Duration) error {
 	err := iq._ttl(key, ttl, true)
 
-	err = iq.writeTTL(key, ttl)
+	err = proto.WriteTTL(iq.aofW, key, ttl)
 
 	return err
 }
@@ -157,7 +158,7 @@ func (iq *IqDB) Type(key string) (int, error) {
 // Lists
 
 // Helper method to obtain and check data type
-func (iq *IqDB) list(key string) (*list, error) {
+func (iq *IqDB) _list(key string) (*list, error) {
 	v, err := iq.distmap.Get(key)
 
 	if err != nil {
@@ -171,10 +172,10 @@ func (iq *IqDB) list(key string) (*list, error) {
 	return v.list, nil
 }
 
-// Get list length
+// Get _list length
 // Returns items count on success and error on fail
 func (iq *IqDB) ListLen(key string) (int, error) {
-	v, err := iq.list(key)
+	v, err := iq._list(key)
 
 	if err != nil {
 		return 0, err
@@ -183,10 +184,10 @@ func (iq *IqDB) ListLen(key string) (int, error) {
 	return len(v.list), nil
 }
 
-// Get list item by its index
+// Get _list item by its index
 // Returns item on success and error on fail
 func (iq *IqDB) ListIndex(key string, index int) (string, error) {
-	v, err := iq.list(key)
+	v, err := iq._list(key)
 
 	if err != nil {
 		return "", err
@@ -199,18 +200,18 @@ func (iq *IqDB) ListIndex(key string, index int) (string, error) {
 	return v.list[index], nil
 }
 
-// Push item to end of list
+// Push item to end of _list
 // Returns items count on success and error on fail
 func (iq *IqDB) ListPush(key string, value ...string) (int, error) {
-	l, err := iq.listPush(key, value, true)
+	l, err := iq._listPush(key, value, true)
 
-	err = iq.writeListPush(key, value...)
+	err = proto.WriteListPush(iq.aofW, key, value...)
 
 	return l, err
 }
 
-func (iq *IqDB) listPush(key string, value []string, lock bool) (int, error) {
-	v, err := iq.list(key)
+func (iq *IqDB) _listPush(key string, value []string, lock bool) (int, error) {
+	v, err := iq._list(key)
 
 	if err != nil && err != ErrKeyNotFound {
 		return 0, err
@@ -233,22 +234,22 @@ func (iq *IqDB) listPush(key string, value []string, lock bool) (int, error) {
 	return len(v.list), nil
 }
 
-// Pop item from end of list
+// Pop item from end of _list
 // Returns items count on success and error on fail
 func (iq *IqDB) ListPop(key string) (int, error) {
-	l, err := iq.listPop(key, true)
+	l, err := iq._listPop(key, true)
 
 	if err != nil {
 		return 0, err
 	}
 
-	err = iq.writeListPop(key)
+	err = proto.WriteListPop(iq.aofW, key)
 
 	return l, err
 }
 
-func (iq *IqDB) listPop(key string, lock bool) (int, error) {
-	v, err := iq.list(key)
+func (iq *IqDB) _listPop(key string, lock bool) (int, error) {
+	v, err := iq._list(key)
 
 	if err != nil {
 		return 0, err
@@ -262,15 +263,15 @@ func (iq *IqDB) listPop(key string, lock bool) (int, error) {
 		return 0, nil
 	}
 
-	v.list = v.list[0 : l-1]
+	v.list = v.list[0: l-1]
 
 	return len(v.list), nil
 }
 
-// Get list items by key with specified index range
+// Get _list items by key with specified index range
 // Returns items slice on success and error on fail
 func (iq *IqDB) ListRange(key string, from, to int) ([]string, error) {
-	v, err := iq.list(key)
+	v, err := iq._list(key)
 
 	if err != nil {
 		return nil, err
@@ -280,11 +281,11 @@ func (iq *IqDB) ListRange(key string, from, to int) ([]string, error) {
 		return nil, ErrListOutOfBounds
 	}
 
-	return v.list[from : to+1], nil
+	return v.list[from: to+1], nil
 }
 
 // Hashes
-func (iq *IqDB) hash(key string) (*hash, error) {
+func (iq *IqDB) _hash(key string) (*hash, error) {
 	v, err := iq.distmap.Get(key)
 
 	if err != nil {
@@ -298,10 +299,10 @@ func (iq *IqDB) hash(key string) (*hash, error) {
 	return v.hash, nil
 }
 
-// Get hash value by key and field
+// Get _hash value by key and field
 // Returns value on success and error on fail
 func (iq *IqDB) HashGet(key string, field string) (string, error) {
-	v, err := iq.hash(key)
+	v, err := iq._hash(key)
 
 	if err != nil {
 		return "", err
@@ -314,10 +315,10 @@ func (iq *IqDB) HashGet(key string, field string) (string, error) {
 	return "", ErrHashKeyNotFound
 }
 
-// Get hash fields and values map by key
+// Get _hash fields and values map by key
 // Returns map of fields and values on success and error on fail
 func (iq *IqDB) HashGetAll(key string) (map[string]string, error) {
-	v, err := iq.hash(key)
+	v, err := iq._hash(key)
 
 	if err != nil {
 		return nil, err
@@ -332,10 +333,10 @@ func (iq *IqDB) HashGetAll(key string) (map[string]string, error) {
 	return ret, nil
 }
 
-// Get hash keys of key
+// Get _hash keys of key
 // Returns string slice of keys on success and error on fail
 func (iq *IqDB) HashKeys(key string) ([]string, error) {
-	v, err := iq.hash(key)
+	v, err := iq._hash(key)
 
 	if err != nil {
 		return nil, err
@@ -350,28 +351,28 @@ func (iq *IqDB) HashKeys(key string) ([]string, error) {
 	return ret, nil
 }
 
-// Delete field from hash
+// Delete field from _hash
 // Returns error on fail
 func (iq *IqDB) HashDel(key string, field string) error {
-	err := iq.hashDel(key, field, true)
+	err := iq._hashDel(key, field, true)
 	if err != nil {
 		return err
 	}
 
-	err = iq.writeHashDel(key, field)
+	err = proto.WriteHashDel(iq.aofW, key, field)
 
 	return err
 }
 
-func (iq *IqDB) hashDel(key, field string, lock bool) error {
-	v, err := iq.hash(key)
+func (iq *IqDB) _hashDel(key, field string, lock bool) error {
+	v, err := iq._hash(key)
 
 	if err != nil {
 		return err
 	}
 
 	// redundant call
-	/*if _, ok := v.hash.Load(field); !ok {
+	/*if _, ok := v._hash.Load(field); !ok {
 		return ErrHashKeyNotFound
 	}*/
 
@@ -380,7 +381,7 @@ func (iq *IqDB) hashDel(key, field string, lock bool) error {
 	return nil
 }
 
-// Set one or more field-value pairs on hash by key
+// Set one or more field-value pairs on _hash by key
 // Example: HashSet("test","k1","v1","k2","v2")
 // Returns error on fail
 func (iq *IqDB) HashSet(key string, args ...string) error {
@@ -395,18 +396,18 @@ func (iq *IqDB) HashSet(key string, args ...string) error {
 
 	}
 
-	err := iq.hashSet(key, kv, true)
+	err := iq._hashSet(key, kv, true)
 	if err != nil {
 		return err
 	}
 
-	err = iq.writeHashSet(key, args...)
+	err = proto.WriteHashSet(iq.aofW, key, args...)
 
 	return err
 }
 
-func (iq *IqDB) hashSet(key string, kv map[string]string, lock bool) error {
-	h, err := iq.hash(key)
+func (iq *IqDB) _hashSet(key string, kv map[string]string, lock bool) error {
+	h, err := iq._hash(key)
 
 	if err != nil && err != ErrKeyNotFound {
 		return err

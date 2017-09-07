@@ -1,164 +1,150 @@
 package protocol
 
 import (
-	"bufio"
 	"time"
 	"io"
+	"errors"
 )
 
-func NewReader() error {
-	rdr := bufio.NewReader(f)
+var ErrNotOk = errors.New("not ok")
 
-	for {
-		op := make([]byte, 1)
+type proto struct {
+	io io.ReadWriteCloser
+}
 
-		n, err := io.ReadFull(rdr, op)
+func ReadOK(r io.Reader) (error) {
+	op := make([]byte, 1)
 
-		if err != nil && err != io.EOF {
-			return err
-		}
+	_, err := io.ReadFull(r, op)
 
-		if n == 0 || err == io.EOF {
-			break
-		}
+	if err != nil {
+		return err
+	}
 
-		switch op[0] {
-		case opSet:
-			key, err := readString(rdr)
-			if err != nil {
-				return err
-			}
-
-			ttl, err := readUint64(rdr)
-			if err != nil {
-				return err
-			}
-
-			val, err := readString(rdr)
-			if err != nil {
-				return err
-			}
-			//println("set", "key", key, "val", val, "ttl", ttl)
-
-			err = iq.set(key, val, time.Duration(ttl)*time.Second, false)
-			if err != nil {
-				return err
-			}
-		case opRemove:
-			key, err := readString(rdr)
-			if err != nil {
-				return err
-			}
-
-			//println("remove", "key", key)
-			err = iq.remove(key, false)
-			if err != nil {
-				return err
-			}
-		case opTTL:
-			key, err := readString(rdr)
-			if err != nil {
-				return err
-			}
-			ttl, err := readUint64(rdr)
-			if err != nil {
-				return err
-			}
-
-			//println("ttl", "key", key, "ttl", ttl)
-
-			err = iq._ttl(key, time.Duration(ttl)*time.Second, false)
-			if err != nil {
-				return err
-			}
-		case opListPush:
-			key, err := readString(rdr)
-			if err != nil {
-				return err
-			}
-			n, err := readUint64(rdr)
-			if err != nil {
-				return err
-			}
-
-			vals := make([]string, int(n))
-			for i := 0; i < int(n); i++ {
-				v, err := readString(rdr)
-				if err != nil {
-					return err
-				}
-
-				vals[i] = v
-			}
-
-			//println("listPush", "key", key, "vals", fmt.Sprintf("%+v", vals))
-
-			_, err = iq.listPush(key, vals, false)
-			if err != nil {
-				return err
-			}
-		case opListPop:
-			key, err := readString(rdr)
-			if err != nil {
-				return err
-			}
-
-			//println("listPop", "key", key)
-
-			_, err = iq.listPop(key, false)
-			if err != nil {
-				return err
-			}
-		case opHashDel:
-			key, err := readString(rdr)
-			if err != nil {
-				return err
-			}
-
-			field, err := readString(rdr)
-			if err != nil {
-				return err
-			}
-
-			//println("hashDel", "key", key, "field", field)
-			err = iq.hashDel(key, field, false)
-			if err != nil {
-				return err
-			}
-		case opHashSet:
-			// TODO check eoh
-			key, err := readString(rdr)
-			if err != nil {
-				return err
-			}
-			n, err := readUint64(rdr)
-			if err != nil {
-				return err
-			}
-
-			vals := make(map[string]string, int(n))
-			for i := 0; i < int(n/2); i++ {
-				f, err := readString(rdr)
-				if err != nil {
-					return err
-				}
-				v, err := readString(rdr)
-				if err != nil {
-					return err
-				}
-
-				vals[f] = v
-			}
-
-			//println("hashSet", "key", key, "fields", fmt.Sprintf("%+v", vals))
-
-			err = iq.hashSet(key, vals, false)
-			if err != nil {
-				return err
-			}
-		}
-
+	if op[0] != OpOk {
+		return ErrNotOk
 	}
 	return nil
+}
 
+func ReadOp(r io.Reader) ([]byte, error) {
+	op := make([]byte, 1)
+
+	_, err := io.ReadFull(r, op)
+
+	return op, err
+}
+
+func ReadGet(r io.Reader) (string, error) {
+	key, err := readString(r)
+	if err != nil {
+		return "",  err
+	}
+
+	return key, nil
+}
+
+func ReadSet(r io.Reader) (string, time.Duration, string, error) {
+	key, err := readString(r)
+	if err != nil {
+		return "", 0, "", err
+	}
+
+	ttl, err := readUint64(r)
+	if err != nil {
+		return "", 0, "", err
+	}
+
+	val, err := readString(r)
+	if err != nil {
+		return "", 0, "", err
+	}
+
+	return key, time.Duration(ttl) * time.Second, val, nil
+}
+
+func ReadRemove(r io.Reader) (string, error) {
+	return readString(r)
+}
+
+func ReadTTL(r io.Reader) (string, time.Duration, error) {
+	key, err := readString(r)
+	if err != nil {
+		return "", 0, err
+	}
+	ttl, err := readUint64(r)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return key, time.Duration(ttl) * time.Second, nil
+}
+
+func ReadListPush(r io.Reader) (string, []string, error) {
+	key, err := readString(r)
+	if err != nil {
+		return "", nil, err
+	}
+	n, err := readUint64(r)
+	if err != nil {
+		return "", nil, err
+	}
+
+	vals := make([]string, int(n))
+	for i := 0; i < int(n); i++ {
+		v, err := readString(r)
+		if err != nil {
+			return "", nil, err
+		}
+
+		vals[i] = v
+	}
+
+	return key, vals, nil
+}
+
+func ReadListPop(r io.Reader) (string, error) {
+	return readString(r)
+}
+
+func ReadHashDel(r io.Reader) (string, string, error) {
+	key, err := readString(r)
+	if err != nil {
+		return "", "", err
+	}
+
+	field, err := readString(r)
+	if err != nil {
+		return "", "", err
+	}
+
+	return key, field, nil
+}
+
+func ReadHashSet(r io.Reader) (string, map[string]string, error) {
+	// TODO check eoh
+	key, err := readString(r)
+	if err != nil {
+		return "", nil, err
+	}
+	n, err := readUint64(r)
+	if err != nil {
+		return "", nil, err
+	}
+
+	vals := make(map[string]string, int(n))
+	for i := 0; i < int(n/2); i++ {
+		f, err := readString(r)
+		if err != nil {
+			return "", nil, err
+		}
+		v, err := readString(r)
+		if err != nil {
+			return "", nil, err
+		}
+
+		vals[f] = v
+	}
+
+	return key, vals, nil
 }

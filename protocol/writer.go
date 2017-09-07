@@ -4,36 +4,11 @@ import (
 	"time"
 	"io"
 	"encoding/binary"
-	"sync"
 )
 
-type w struct {
-	w io.Writer
-	syncMx *sync.Mutex
-}
-
-func NewWriter(w io.Writer) *w {
-	return &w{
-		w: w,
-		syncMx:&sync.Mutex{},
-	}
-}
-
-func (w *w) WriteKeyOp(op byte, key string) error {
-	// op
-	_, err := w.w.Write([]byte{op})
-	if err != nil {
-		return err
-	}
-	// key
-	kb := []byte(key)
-	l := make([]byte, 8)
-	binary.LittleEndian.PutUint64(l, uint64(len(kb)))
-	_, err = w.w.Write(l)
-	if err != nil {
-		return err
-	}
-	_, err = w.w.Write(kb)
+func WriteOK(w io.Writer) error {
+	// write just op :)
+	_, err := w.Write([]byte{OpError})
 	if err != nil {
 		return err
 	}
@@ -41,25 +16,85 @@ func (w *w) WriteKeyOp(op byte, key string) error {
 	return nil
 }
 
-func (w *w) WriteRemove(key string) error {
-	w.syncMx.Lock()
-	defer w.syncMx.Unlock()
+func WriteError(w io.Writer, e error) error {
+	// op
+	_, err := w.Write([]byte{OpError})
+	if err != nil {
+		return err
+	}
+	// error
 
-	return w.WriteKeyOp(OpRemove, key)
+	errb := []byte(e.Error())
+	l := make([]byte, 8)
+	binary.LittleEndian.PutUint64(l, uint64(len(errb)))
+	_, err = w.Write(l)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(errb)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+func WriteKeyOp(w io.Writer, op byte, key string) error {
+	// op
+	_, err := w.Write([]byte{op})
+	if err != nil {
+		return err
+	}
+	// key
+	kb := []byte(key)
+	l := make([]byte, 8)
+	binary.LittleEndian.PutUint64(l, uint64(len(kb)))
+	_, err = w.Write(l)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(kb)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (w *w) WriteListPop(key string) error {
-	w.syncMx.Lock()
-	defer w.syncMx.Unlock()
-
-	return w.WriteKeyOp(OpListPop, key)
+func WriteRemove(w io.Writer, key string) error {
+	return WriteKeyOp(w,OpRemove, key)
 }
 
-func (w *w) WriteSet(key, value string, ttl time.Duration) error {
-	w.syncMx.Lock()
-	defer w.syncMx.Unlock()
+func WriteListPop(w io.Writer, key string) error {
+	return WriteKeyOp(w,OpListPop, key)
+}
 
-	err := w.WriteKeyOp(OpSet, key)
+func WriteGet(w io.Writer, k string) error {
+	// op
+	_, err := w.Write([]byte{OpGet})
+	if err != nil {
+		return err
+	}
+	// error
+
+	kb := []byte(k)
+	l := make([]byte, 8)
+	binary.LittleEndian.PutUint64(l, uint64(len(kb)))
+	_, err = w.Write(l)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(kb)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func WriteSet(w io.Writer, key, value string, ttl time.Duration) error {
+	err := WriteKeyOp(w, OpSet, key)
 	if err != nil {
 		return err
 	}
@@ -67,7 +102,7 @@ func (w *w) WriteSet(key, value string, ttl time.Duration) error {
 	ttlb := make([]byte, 8)
 
 	binary.LittleEndian.PutUint64(ttlb, uint64(ttl.Seconds()))
-	_, err = w.w.Write(ttlb)
+	_, err = w.Write(ttlb)
 	if err != nil {
 		return err
 	}
@@ -76,22 +111,19 @@ func (w *w) WriteSet(key, value string, ttl time.Duration) error {
 	l := make([]byte, 8)
 	binary.LittleEndian.PutUint64(l, uint64(len(kb)))
 
-	_, err = w.w.Write(l)
+	_, err = w.Write(l)
 	if err != nil {
 		return err
 	}
-	_, err = w.w.Write(kb)
+	_, err = w.Write(kb)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (w *w) WriteTTL(key string, ttl time.Duration) error {
-	w.syncMx.Lock()
-	defer w.syncMx.Unlock()
-
-	err := w.WriteKeyOp(OpTTL, key)
+func WriteTTL(w io.Writer, key string, ttl time.Duration) error {
+	err := WriteKeyOp(w, OpTTL, key)
 	if err != nil {
 		return err
 	}
@@ -99,7 +131,7 @@ func (w *w) WriteTTL(key string, ttl time.Duration) error {
 	ttlb := make([]byte, 8)
 
 	binary.LittleEndian.PutUint64(ttlb, uint64(ttl.Seconds()))
-	_, err = w.w.Write(ttlb)
+	_, err = w.Write(ttlb)
 	if err != nil {
 		return err
 	}
@@ -107,18 +139,15 @@ func (w *w) WriteTTL(key string, ttl time.Duration) error {
 	return nil
 }
 
-func (w *w) WriteListPush(key string, args ...string) error {
-	w.syncMx.Lock()
-	defer w.syncMx.Unlock()
-
-	err := w.WriteKeyOp(OpListPush, key)
+func WriteListPush(w io.Writer, key string, args ...string) error {
+	err := WriteKeyOp(w, OpListPush, key)
 	if err != nil {
 		return err
 	}
 
 	an := make([]byte, 8)
 	binary.LittleEndian.PutUint64(an, uint64(len(args)))
-	_, err = w.w.Write(an)
+	_, err = w.Write(an)
 	if err != nil {
 		return err
 	}
@@ -127,11 +156,11 @@ func (w *w) WriteListPush(key string, args ...string) error {
 		kb := []byte(v)
 		l := make([]byte, 8)
 		binary.LittleEndian.PutUint64(l, uint64(len(kb)))
-		_, err = w.w.Write(l)
+		_, err = w.Write(l)
 		if err != nil {
 			return err
 		}
-		_, err = w.w.Write(kb)
+		_, err = w.Write(kb)
 		if err != nil {
 			return err
 		}
@@ -140,18 +169,15 @@ func (w *w) WriteListPush(key string, args ...string) error {
 	return nil
 }
 
-func (w *w) WriteHashSet(key string, args ...string) error {
-	w.syncMx.Lock()
-	defer w.syncMx.Unlock()
-
-	err := w.WriteKeyOp(OpHashSet, key)
+func WriteHashSet(w io.Writer, key string, args ...string) error {
+	err := WriteKeyOp(w, OpHashSet, key)
 	if err != nil {
 		return err
 	}
 
 	an := make([]byte, 8)
 	binary.LittleEndian.PutUint64(an, uint64(len(args)))
-	_, err = w.w.Write(an)
+	_, err = w.Write(an)
 	if err != nil {
 		return err
 	}
@@ -160,11 +186,11 @@ func (w *w) WriteHashSet(key string, args ...string) error {
 		kb := []byte(v)
 		l := make([]byte, 8)
 		binary.LittleEndian.PutUint64(l, uint64(len(kb)))
-		_, err = w.w.Write(l)
+		_, err = w.Write(l)
 		if err != nil {
 			return err
 		}
-		_, err = w.w.Write(kb)
+		_, err = w.Write(kb)
 		if err != nil {
 			return err
 		}
@@ -173,11 +199,8 @@ func (w *w) WriteHashSet(key string, args ...string) error {
 	return nil
 }
 
-func (w *w) WriteHashDel(key, f string) error {
-	w.syncMx.Lock()
-	defer w.syncMx.Unlock()
-
-	err := w.WriteKeyOp(OpHashDel, key)
+func WriteHashDel(w io.Writer, key, f string) error {
+	err := WriteKeyOp(w, OpHashDel, key)
 	if err != nil {
 		return err
 	}
@@ -186,11 +209,11 @@ func (w *w) WriteHashDel(key, f string) error {
 	kb := []byte(f)
 	l := make([]byte, 8)
 	binary.LittleEndian.PutUint64(l, uint64(len(kb)))
-	_, err = w.w.Write(l)
+	_, err = w.Write(l)
 	if err != nil {
 		return err
 	}
-	_, err = w.w.Write(kb)
+	_, err = w.Write(kb)
 	if err != nil {
 		return err
 	}

@@ -23,7 +23,7 @@ func (dm *distmap) getShard(key string) *shard {
 	var shardKey int
 
 	// Optimization for one shard local system, boost about x20 performance by
-	// omitting hash calling
+	// omitting _hash calling
 	if dm.shardCount > 1 {
 		hasher := sha1.New()
 		hasher.Write([]byte(key))

@@ -2,10 +2,10 @@ package iqdb
 
 import (
 	"bufio"
-	"encoding/binary"
 	"errors"
 	"github.com/ravlio/iqdb/redis"
 	"github.com/ravlio/iqdb/tcp"
+	proto "github.com/ravlio/iqdb/protocol"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"os"
@@ -16,10 +16,10 @@ import (
 
 var ErrKeyNotFound = errors.New("key not found")
 var ErrKeyTypeError = errors.New("wrong key type")
-var ErrListIndexError = errors.New("wrong list index")
-var ErrListOutOfBounds = errors.New("list range out of bounds")
-var ErrHashKeyNotFound = errors.New("hash key not found")
-var ErrHashKeyValueMismatch = errors.New("hash keys and values mismatch")
+var ErrListIndexError = errors.New("wrong _list index")
+var ErrListOutOfBounds = errors.New("_list range out of bounds")
+var ErrHashKeyNotFound = errors.New("_hash key not found")
+var ErrHashKeyValueMismatch = errors.New("_hash keys and values mismatch")
 
 // Three types of storage items
 const (
@@ -28,10 +28,9 @@ const (
 	dataTypeHash = 3
 )
 
-
 type Options struct {
 	RedisPort int
-	TCPPort int
+	TCPPort   int
 	HTTPPort  int
 	// Default TTL. Used if >0
 	TTL        time.Duration
@@ -46,7 +45,7 @@ type Options struct {
 
 type IqDB struct {
 	fname string
-	Opts   *Options
+	Opts  *Options
 	// Error channel for goroutines
 	Errch chan error
 	// Using distributed hashed map
@@ -56,7 +55,7 @@ type IqDB struct {
 	// Time callback for back to the future (ttl testing purposes)
 	timeCb     func() time.Time
 	aof        *os.File
-	aofW       io.Writer
+	aofW       *io.Writer
 	aofBuf     *bufio.Writer
 	syncTicker *time.Ticker
 	isSyncing  bool
@@ -106,7 +105,7 @@ func Open(fname string, opts *Options) (*IqDB, error) {
 		syncMx:  &sync.Mutex{},
 	}
 
-	db.ttl = NewTTLTree(db.removeFromHash)
+	db.ttl = NewTTLTree(db._removeFromHash)
 
 	aof, err := os.OpenFile(fname, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
@@ -128,13 +127,11 @@ func Open(fname string, opts *Options) (*IqDB, error) {
 		go db.runSyncer()
 
 	} else {
-		db.aofW = aof
+		db.aofW = db.aof
 	}
 
 	return db, nil
 }
-
-
 
 func MakeHTTPClient() Client {
 	return &http{}
@@ -173,17 +170,12 @@ func (iq IqDB) Close() error {
 	}
 
 	if iq.Opts.RedisPort > 0 {
-		err := iq.redis.Stop()
-		if err != nil {
-			return err
-		}
+		iq.redis.Stop()
+
 	}
 
 	if iq.Opts.TCPPort > 0 {
-		err := iq.tcp.Stop()
-		if err != nil {
-			return err
-		}
+		iq.tcp.Stop()
 	}
 	return iq.aof.Close()
 }
@@ -193,8 +185,6 @@ func (iq *IqDB) serveHTTP() {
 
 	log.Infof("HTTP server now accept connections on port %d ...", iq.Opts.HTTPPort)
 }
-
-
 
 func (iq *IqDB) readAOF() error {
 	iq.syncMx.Lock()
@@ -211,6 +201,96 @@ func (iq *IqDB) readAOF() error {
 		return err
 	}
 
+	rdr := bufio.NewReader(f)
+
+	for {
+		op, err := proto.ReadOp(rdr)
+		if err != nil && err != io.EOF {
+			return err
+		}
+
+		if err == io.EOF {
+			break
+		}
+
+		switch op[0] {
+		case proto.OpSet:
+
+			//println("set", "key", key, "val", val, "ttl", ttl)
+
+			key, ttl, val, err := proto.ReadSet(rdr)
+			if err != nil {
+				return err
+			}
+			err = iq.set(key, val, ttl, false)
+			if err != nil {
+				return err
+			}
+		case proto.OpRemove:
+			key, err := proto.ReadRemove(rdr)
+			if err != nil {
+				return err
+			}
+
+			//println("_remove", "key", key)
+			err = iq._remove(key, false)
+			if err != nil {
+				return err
+			}
+		case proto.OpTTL:
+			key, ttl, err := proto.ReadTTL(rdr)
+			if err != nil {
+				return err
+			}
+
+			//println("ttl", "key", key, "ttl", ttl)
+
+			err = iq._ttl(key, ttl, false)
+			if err != nil {
+				return err
+			}
+		case proto.OpListPush:
+			key, vals, err := proto.ReadListPush(rdr)
+
+			//println("_listPush", "key", key, "vals", fmt.Sprintf("%+v", vals))
+
+			_, err = iq._listPush(key, vals, false)
+			if err != nil {
+				return err
+			}
+		case proto.OpListPop:
+			key, err := proto.ReadListPop(rdr)
+			if err != nil {
+				return err
+			}
+
+			//println("_listPop", "key", key)
+
+			_, err = iq._listPop(key, false)
+			if err != nil {
+				return err
+			}
+		case proto.OpHashDel:
+			key, field, err := proto.ReadHashDel(rdr)
+			if err != nil {
+				return err
+			}
+
+			//println("_hashDel", "key", key, "field", field)
+			err = iq._hashDel(key, field, false)
+			if err != nil {
+				return err
+			}
+		case proto.OpHashSet:
+			key, vals, err := proto.ReadHashSet(rdr)
+
+			//println("_hashSet", "key", key, "fields", fmt.Sprintf("%+v", vals))
+
+			err = iq._hashSet(key, vals, false)
+			if err != nil {
+				return err
+			}
+		}
 
 	}
 

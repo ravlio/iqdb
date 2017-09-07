@@ -1,6 +1,7 @@
 package protocol
 
 import "io"
+import "encoding/binary"
 
 const (
 	OpSet      = 1
@@ -10,6 +11,9 @@ const (
 	OpListPop  = 5
 	OpHashDel  = 6
 	OpHashSet  = 7
+	OpError    = 8
+	OpGet      = 9
+	OpOk       = 10
 )
 
 func readString(rdr io.Reader) (string, error) {
