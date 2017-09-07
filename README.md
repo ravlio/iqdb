@@ -20,6 +20,13 @@ for list:
 [byte Operation][int64 list len][int64 item len][[]byte string]
 ```
 
+example SET operation (operation, key with length, ttl (int64), value with length)
+
+```
+[1][7][testkey][10][9][testvalue]
+```
+
+error handling and empty answers are operations too. 
 
 ## Docker run
 
