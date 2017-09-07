@@ -6,6 +6,22 @@ fast Key-Value database with unified client interface. Can by used as embedded s
 
 Documentation: https://godoc.org/github.com/ravlio/iqdb
 
+## Binary protocol
+
+Protocol is dead simple. First byte is operation. For string format is int64 size header and then comes byte sequence. For list is additional item count. 
+
+for string:
+```
+[byte Operation][int64 len][[]byte string]
+```
+
+for list:
+```
+[byte Operation][int64 list len][int64 item len][[]byte string]
+```
+
+
 ## Docker run
 
-`docker run -it -d -p 7369:7369 -v /local/path/to/db:/iqdb :0.1.0`
+`docker run -it -d -p 7369:7369 -v /local/path/to/db:/iqdb iqdb:0.1.0`
+
