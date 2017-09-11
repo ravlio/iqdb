@@ -28,7 +28,11 @@ example SET operation (operation, key with length, ttl (int64), value with lengt
 
 error handling and empty answers are operations too. 
 
-## Docker run
+## Docker run on redis protocol
 
-`docker run -it -d -p 7369:7369 -v /local/path/to/db:/iqdb iqdb:0.1.0`
+`docker run --rm -d -p 7379:7379 ravlio/iqdb:0.1.0`
 
+then you can connect via
+`redis-cli -p 7379`
+
+Please use only `capital` letters for commands. E.g. `SET a 1` is allowed, `set a 1` is not allowed.
