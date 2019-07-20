@@ -8,7 +8,7 @@ Documentation: https://godoc.org/github.com/ravlio/iqdb
 
 ## Binary protocol
 
-Protocol is dead simple. First byte is operation. For string format is int64 size header and then comes byte sequence. For list is additional item count. 
+Protocol is stupid simple. First byte is operation. For string format is int64 size header and then comes byte sequence. For list is additional item count. 
 
 for string:
 ```
