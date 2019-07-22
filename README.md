@@ -10,9 +10,13 @@ IqDB is:
 - Supports k/v, hashes, lists
 - Sync/async binary AOF-persistence 
 - TTL on BTree
-- Supports Redis protocol
-- Embedded
-- Redis and embedded at same time
+- Supports Redis text protocol on TCP
+- Can be used in embedded mode
+
+TODO:
+- Raw TCP client/server with multiplexing
+- HTTP client/server
+- Replication
 
 ## Binary protocol
 
