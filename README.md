@@ -1,8 +1,18 @@
 # iqdb
 
-fast Key-Value database with unified client interface. Can by used as embedded storage or as standalone TCP/HTTP server.
+*POC, not for production, made just for showing my code style, nothing more*
 
 Documentation: https://godoc.org/github.com/ravlio/iqdb
+
+IqDB is:
+- Fast
+- Multi-protocol in-memory database
+- Supports k/v, hashes, lists
+- Sync/async binary AOF-persistence 
+- TTL on BTree
+- Supports Redis protocol
+- Embedded
+- Redis and embedded at same time
 
 ## Binary protocol
 

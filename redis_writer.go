@@ -1,4 +1,4 @@
-package redis
+package iqdb
 
 import (
 	"errors"
@@ -9,17 +9,17 @@ import (
 	"time"
 )
 
-type Writer struct {
+type redisWriter struct {
 	w io.Writer
 }
 
-func NewWriter(w io.Writer) *Writer {
-	return &Writer{
+func newRedisWriter(w io.Writer) *redisWriter {
+	return &redisWriter{
 		w: w,
 	}
 }
 
-func (w *Writer) WriteStringSlice(args []string) error {
+func (w *redisWriter) writeStringSlice(args []string) error {
 	a := make([]interface{}, len(args))
 	for k, v := range args {
 		a[k] = v
@@ -27,7 +27,7 @@ func (w *Writer) WriteStringSlice(args []string) error {
 	return w.writeArgs(a)
 }
 
-func (w *Writer) writeArgs(args []interface{}) error {
+func (w *redisWriter) writeArgs(args []interface{}) error {
 	argsNum := len(args)
 	buf := make([]byte, 0, 10*argsNum)
 	buf = append(buf, '*')
@@ -90,8 +90,8 @@ func (w *Writer) writeArgs(args []interface{}) error {
 	return err
 }
 
-// Write data
-func (w *Writer) Write(args ...interface{}) error {
+// write data
+func (w *redisWriter) write(args ...interface{}) error {
 	return w.writeArgs(args)
 }
 

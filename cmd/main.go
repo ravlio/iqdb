@@ -9,13 +9,10 @@ import (
 var dbname = flag.String("dbname", "db", "database filename")
 var tcpPort = flag.Int("tcp", 7379, "tcp port")
 
-//var httpPort = flag.Int("http", 8081, "http port")
-
 func main() {
 	log.Info("Starting ...")
 	db, err := iqdb.Open(*dbname, &iqdb.Options{
-		TCPPort: *tcpPort,
-		//HTTPPort: *httpPort,
+		RedisPort: *tcpPort,
 	})
 
 	if err != nil {

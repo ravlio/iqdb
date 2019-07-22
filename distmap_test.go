@@ -29,8 +29,8 @@ func init() {
 
 		kv := &iqdb.KV{Value: is}
 		m[is] = kv
-		dm10.Set(is, kv)
-		dm100.Set(is, kv)
+		_ = dm10.Set(is, kv)
+		_ = dm100.Set(is, kv)
 	}
 }
 
@@ -70,7 +70,7 @@ func Benchmark1ShardMapSequentialRead(b *testing.B) {
 	var i = 0
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			dm1.Get(strconv.Itoa(i))
+			_, _ = dm1.Get(strconv.Itoa(i))
 			i++
 			if i > it {
 				i = 0
@@ -84,7 +84,7 @@ func Benchmark1ShardMapRandomRead(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var i = 0
 		for pb.Next() {
-			dm1.Get(rnd[i])
+			_, _ = dm1.Get(rnd[i])
 			i++
 			if i >= it {
 				i = 0
@@ -97,7 +97,7 @@ func Benchmark10ShardMapSequentialRead(b *testing.B) {
 	var i = 0
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			dm10.Get(strconv.Itoa(i))
+			_, _ = dm10.Get(strconv.Itoa(i))
 			i++
 			if i > it {
 				i = 0
@@ -110,7 +110,7 @@ func Benchmark10ShardMapRandomRead(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var i = 0
 		for pb.Next() {
-			dm10.Get(rnd[i])
+			_, _ = dm10.Get(rnd[i])
 			i++
 			if i >= it {
 				i = 0
@@ -123,7 +123,7 @@ func Benchmark100ShardMapSequentialRead(b *testing.B) {
 	var i = 0
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			dm100.Get(strconv.Itoa(i))
+			_, _ = dm100.Get(strconv.Itoa(i))
 			i++
 			if i > it {
 				i = 0
@@ -136,7 +136,7 @@ func Benchmark100ShardMapRandomRead(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var i = 0
 		for pb.Next() {
-			dm100.Get(rnd[i])
+			_, _ = dm100.Get(rnd[i])
 			i++
 			if i >= it {
 				i = 0

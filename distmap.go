@@ -7,23 +7,18 @@ import (
 )
 
 type distmap struct {
-	// Shards for faster access and keys distribution among multiple servers and replicas
 	shards     []*shard
 	mx         *sync.RWMutex
 	shardCount int
 }
 
 type shard struct {
-	// golang 1.9+ sync.map without additional mutex using
 	kv *sync.Map
 }
 
-// Simple hashing algorithm for getting properly hard against key
 func (dm *distmap) getShard(key string) *shard {
 	var shardKey int
 
-	// Optimization for one shard local system, boost about x20 performance by
-	// omitting hash calling
 	if dm.shardCount > 1 {
 		hasher := sha1.New()
 		hasher.Write([]byte(key))

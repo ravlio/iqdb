@@ -1,9 +1,11 @@
 package iqdb_test
 
-import "testing"
+import (
+	"github.com/stretchr/testify/require"
+	"testing"
+)
 import "github.com/ravlio/iqdb"
 import (
-	"github.com/stretchr/testify/assert"
 	"os"
 	"strconv"
 	"time"
@@ -11,7 +13,7 @@ import (
 
 var db *iqdb.IqDB
 var direct iqdb.Client
-var tcp iqdb.Client
+var redis iqdb.Client
 var http iqdb.Client
 
 func TestMain(m *testing.M) {
@@ -23,7 +25,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// Open new db or use existing one
-	db, err = iqdb.Open("test", &iqdb.Options{TCPPort: 7777, HTTPPort: 8888, ShardCount: 100})
+	db, err = iqdb.Open("test", &iqdb.Options{RedisPort: 7777, HTTPPort: 8888, ShardCount: 100})
 
 	if err != nil {
 		panic(err)
@@ -47,7 +49,7 @@ func TestMain(m *testing.M) {
 
 	direct = i.(iqdb.Client)
 
-	tcp, err = iqdb.MakeTCPClient(":7777")
+	redis, err = iqdb.NewRedisClient(":7777")
 	if err != nil {
 		panic(err)
 	}
@@ -77,7 +79,7 @@ func TestMain(m *testing.M) {
 func TestAOF(t *testing.T) {
 	var err error
 
-	ass := assert.New(t)
+	req := require.New(t)
 
 	// Open new db or use existing one
 	aof, err := iqdb.Open("aof", &iqdb.Options{ShardCount: 100})
@@ -87,214 +89,112 @@ func TestAOF(t *testing.T) {
 	}
 
 	err = aof.Set("k1", "v1", time.Second*10)
-	if !ass.NoError(err) {
-		return
-	}
-	err = aof.Set("k2", "v2")
-	if !ass.NoError(err) {
-		return
-	}
-	err = aof.Set("k3", "v3")
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(err)
+	req.NoError(aof.Set("k2", "v2"))
+	req.NoError(aof.Set("k3", "v3"))
+	req.NoError(aof.Set("k3", "v4"))
+	req.NoError(aof.Remove("k2"))
+	req.NoError(aof.HashSet("h1", "k1", "v1", "k2", "v2"))
+	req.NoError(aof.Remove("h1"))
+	req.NoError(aof.HashSet("h2", "k1", "v1", "k2", "v2"))
+	req.NoError(aof.HashSet("h2", "k3", "v3"))
+	req.NoError(aof.HashDel("h2", "k2"))
+	_, err = aof.ListPush("l1", "a", "b", "c")
+	req.NoError(err)
 
-	err = aof.Set("k3", "v4")
-	if !ass.NoError(err) {
-		return
-	}
-	err = aof.Remove("k2")
-	if !ass.NoError(err) {
-		return
-	}
-	err = aof.HashSet("h1", "k1", "v1", "k2", "v2")
-	if !ass.NoError(err) {
-		return
-	}
-	err = aof.Remove("h1")
-	if !ass.NoError(err) {
-		return
-	}
-	err = aof.HashSet("h2", "k1", "v1", "k2", "v2")
-	if !ass.NoError(err) {
-		return
-	}
-	err = aof.HashSet("h2", "k3", "v3")
-	if !ass.NoError(err) {
-		return
-	}
-	err = aof.HashDel("h2", "k2")
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(aof.Remove("l1"))
 	_, err = aof.ListPush("l1", "a", "b", "c")
-	if !ass.NoError(err) {
-		return
-	}
-	err = aof.Remove("l1")
-	if !ass.NoError(err) {
-		return
-	}
-	_, err = aof.ListPush("l1", "a", "b", "c")
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(err)
+
 	_, err = aof.ListPop("l1")
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(err)
 
 	// Closing DB
 
-	err = aof.Close()
-
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(aof.Close())
 
 	aof, err = iqdb.Open("aof", &iqdb.Options{ShardCount: 100})
 
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(err)
 
 	v, err := aof.Get("k1")
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(err)
 
-	if !ass.EqualValues("v1", v) {
-		return
-	}
+	req.EqualValues("v1", v)
 
 	v, err = aof.Get("k3")
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(err)
 
-	if !ass.EqualValues("v4", v) {
-		return
-	}
+	req.EqualValues("v4", v)
 
 	_, err = aof.Get("k2")
-	if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-		return
-	}
+	req.Equal(iqdb.ErrKeyNotFound, err)
 
 	_, err = aof.HashKeys("h1")
-	if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-		return
-	}
+	req.Equal(iqdb.ErrKeyNotFound, err)
 
 	h, err := aof.HashGetAll("h2")
 
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(err)
 
-	if !ass.Equal(map[string]string{"k1": "v1", "k3": "v3"}, h) {
-		return
-	}
+	req.Equal(map[string]string{"k1": "v1", "k3": "v3"}, h)
 
 	l, err := aof.ListRange("l1", 0, 1)
 
-	if !ass.Equal([]string{"a", "b"}, l) {
-		return
-	}
+	req.NoError(err)
+
+	req.Equal([]string{"a", "b"}, l)
 
 	err = aof.Close()
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(err)
 }
 
 func testOps(t *testing.T, cl iqdb.Client) {
 	var err error
 
-	ass := assert.New(t)
+	req := require.New(t)
 
 	t.Run("Standard KV", func(t *testing.T) {
 		_, err = cl.Get("unexisting")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
-		err = cl.Set("k", "")
-
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(cl.Set("k", ""))
 
 		res, err := cl.Get("k")
+		req.NoError(err)
 
-		if !ass.NoError(err) {
-			return
-		}
+		req.Equal("", res)
 
-		if !ass.Equal("", res) {
-			return
-		}
-
-		err = cl.Set("k", "val2")
-
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(cl.Set("k", "val2"))
 
 		res, err = cl.Get("k")
 
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(err)
 
-		if !ass.Equal("val2", res) {
-			return
-		}
+		req.Equal("val2", res)
 
-		err = cl.Set("k2", "str1\n\rstr2")
-
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(cl.Set("k2", "str1\n\rstr2"))
 
 		res, err = cl.Get("k2")
 
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(err)
 
-		if !ass.Equal("str1\n\rstr2", res) {
-			return
-		}
+		req.Equal("str1\n\rstr2", res)
 
-		err = cl.Remove("k2")
-
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(cl.Remove("k2"))
 
 		res, err = cl.Get("k2")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
-		err = cl.Set("ttl", "val", time.Minute)
-
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(cl.Set("ttl", "val", time.Minute))
 
 		res, err = cl.Get("ttl")
 
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(err)
 
-		if !ass.Equal("val", res) {
-			return
-		}
+		req.Equal("val", res)
 	})
 
 	if t.Failed() {
@@ -304,101 +204,55 @@ func testOps(t *testing.T, cl iqdb.Client) {
 	t.Run("Hashes", func(t *testing.T) {
 		_, err := cl.HashGetAll("unexisting")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
 		_, err = cl.HashGet("unexisting", "213")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
 		err = cl.HashDel("unexisting", "123")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
 		_, err = cl.HashKeys("unexisting")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
-		err = cl.HashSet("hash", "f1", "1")
-
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(cl.HashSet("hash", "f1", "1"))
 
 		h, err := cl.HashGetAll("hash")
 
-		if !ass.Equal(map[string]string{"f1": "1"}, h) {
-			return
-		}
+		req.Equal(map[string]string{"f1": "1"}, h)
 
 		v, err := cl.HashGet("hash", "f1")
 
-		if !ass.Equal(v, "1") {
-			return
-		}
+		req.Equal(v, "1")
 
-		err = cl.HashDel("hash", "unex")
-
-		/*
-			if !ass.Equal(iqdb.ErrHashKeyNotFound, err) {
-				return
-			}
-		*/
+		req.NoError(cl.HashDel("hash", "unex"))
 
 		keys, err := cl.HashKeys("hash")
 
-		if !ass.Equal([]string{"f1"}, keys) {
-			return
-		}
+		req.Equal([]string{"f1"}, keys)
 
-		err = cl.HashDel("hash", "f1")
-
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(cl.HashDel("hash", "f1"))
 
 		err = cl.HashSet("hash", "k1")
 
-		if !ass.Equal(iqdb.ErrHashKeyValueMismatch, err) {
-			return
-		}
+		req.Equal(iqdb.ErrHashKeyValueMismatch, err)
 
-		err = cl.HashSet("hash", "k1", "v1", "k2", "v2")
+		req.NoError(cl.HashSet("hash", "k1", "v1", "k2", "v2"))
 
-		if !ass.NoError(err) {
-			return
-		}
-
-		err = cl.HashSet("hash", "k3", "v3")
-
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(cl.HashSet("hash", "k3", "v3"))
 
 		h, err = cl.HashGetAll("hash")
 
-		if !ass.Equal(map[string]string{"k1": "v1", "k2": "v2", "k3": "v3"}, h) {
-			return
-		}
+		req.Equal(map[string]string{"k1": "v1", "k2": "v2", "k3": "v3"}, h)
 
-		err = cl.Remove("hash")
-
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(cl.Remove("hash"))
 
 		_, err = cl.HashGetAll("hash")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 	})
 
 	if t.Failed() {
@@ -408,109 +262,74 @@ func testOps(t *testing.T, cl iqdb.Client) {
 	t.Run("Lists", func(t *testing.T) {
 		_, err := cl.ListLen("unexisting")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
 		_, err = cl.ListIndex("unexisting", 1)
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
 		_, err = cl.ListPop("unexisting")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
 		_, err = cl.ListRange("unexisting", 0, 10)
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
 		c, err := cl.ListPush("list", "a", "b", "c", "d")
 
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(err)
 
-		if !ass.EqualValues(4, c) {
-			return
-		}
+		req.EqualValues(4, c)
 
 		c, err = cl.ListPop("list")
 
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(err)
 
-		if !ass.EqualValues(3, c) {
-			return
-		}
+		req.EqualValues(3, c)
 
 		l, err := cl.ListIndex("list", 1)
 
-		if !ass.NoError(err) {
-			return
-		}
+		req.NoError(err)
 
-		if !ass.EqualValues("b", l) {
-			return
-		}
+		req.EqualValues("b", l)
 
 		l, err = cl.ListIndex("list", 10)
 
-		if !ass.Equal(iqdb.ErrListIndexError, err) {
-			return
-		}
+		req.Equal(iqdb.ErrListIndexError, err)
 
 		_, err = cl.ListRange("list", 0, 10)
 
-		if !ass.Equal(iqdb.ErrListOutOfBounds, err) {
-			return
-		}
+		req.Equal(iqdb.ErrListOutOfBounds, err)
 
 		lr, err := cl.ListRange("list", 0, 2)
 
-		if !ass.Equal([]string{"a", "b", "c"}, lr) {
-			return
-		}
+		req.Equal([]string{"a", "b", "c"}, lr)
 
 	})
 
 	t.Run("TTL", func(t *testing.T) {
-		cl.Set("nottl", "test1")
-		cl.Set("ttl1sec", "test2", time.Second*1)
-		cl.Set("ttl10sec", "test3", time.Second*10)
+		req.NoError(cl.Set("nottl", "test1"))
+		req.NoError(cl.Set("ttl1sec", "test2", time.Second*1))
+		req.NoError(cl.Set("ttl10sec", "test3", time.Second*10))
 
 		v, err := cl.Get("nottl")
 
-		if !ass.NoError(err) {
-			return
-		}
-		if !ass.EqualValues(v, "test1") {
-			return
-		}
+		require.NoError(t, err)
+
+		req.EqualValues(v, "test1")
 
 		v, err = cl.Get("ttl1sec")
 
-		if !ass.NoError(err) {
-			return
-		}
-		if !ass.EqualValues(v, "test2") {
-			return
-		}
+		req.NoError(err)
+
+		req.EqualValues(v, "test2")
 
 		v, err = cl.Get("ttl10sec")
 
-		if !ass.NoError(err) {
-			return
-		}
-		if !ass.EqualValues(v, "test3") {
-			return
-		}
+		req.NoError(err)
+
+		req.EqualValues(v, "test3")
 
 		timeShift := time.Second * 2
 
@@ -521,18 +340,13 @@ func testOps(t *testing.T, cl iqdb.Client) {
 		db.ForeTTLRecheck()
 		_, err = cl.Get("ttl1sec")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
 		v, err = cl.Get("ttl10sec")
 
-		if !ass.NoError(err) {
-			return
-		}
-		if !ass.EqualValues(v, "test3") {
-			return
-		}
+		req.NoError(err)
+
+		req.EqualValues(v, "test3")
 
 		timeShift = timeShift + time.Minute
 
@@ -544,11 +358,9 @@ func testOps(t *testing.T, cl iqdb.Client) {
 
 		_, err = cl.Get("ttl10sec")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
-		cl.TTL("nottl", time.Second)
+		req.NoError(cl.TTL("nottl", time.Second))
 
 		timeShift = timeShift + time.Second*2
 
@@ -559,9 +371,7 @@ func testOps(t *testing.T, cl iqdb.Client) {
 
 		_, err = cl.Get("nottl")
 
-		if !ass.Equal(iqdb.ErrKeyNotFound, err) {
-			return
-		}
+		req.Equal(iqdb.ErrKeyNotFound, err)
 
 	})
 	if t.Failed() {
@@ -569,28 +379,21 @@ func testOps(t *testing.T, cl iqdb.Client) {
 	}
 }
 
-func TestTCP(t *testing.T) {
+func TestRedis(t *testing.T) {
 	var err error
 
-	ass := assert.New(t)
+	req := require.New(t)
 
-	err = tcp.Set("k", "v", time.Second)
-	if !ass.NoError(err) {
-		return
-	}
+	req.NoError(redis.Set("k", "v", time.Second))
 
-	k, err := tcp.Get("k")
-	if !ass.NoError(err) {
-		return
-	}
+	k, err := redis.Get("k")
+	req.NoError(err)
 
-	if !ass.Equal("v", k) {
-		return
-	}
+	req.Equal("v", k)
 }
 
 func TestOps(t *testing.T) {
-	testOps(t, tcp)
+	testOps(t, redis)
 
 	if t.Failed() {
 		return
@@ -601,7 +404,7 @@ func Benchmark1Set(b *testing.B) {
 	var i = 0
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			direct.Set(strconv.Itoa(i), strconv.Itoa(i), time.Second)
+			_ = direct.Set(strconv.Itoa(i), strconv.Itoa(i), time.Second)
 			i++
 		}
 	})
@@ -611,7 +414,7 @@ func Benchmark1Get(b *testing.B) {
 	var i = 0
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			db.Get(strconv.Itoa(i))
+			_, _ = db.Get(strconv.Itoa(i))
 			i++
 		}
 	})
@@ -620,7 +423,7 @@ func Benchmark1Get(b *testing.B) {
 func BenchmarkTCP1Set(b *testing.B) {
 	var i = 0
 	for n := 0; n < b.N; n++ {
-		tcp.Set(strconv.Itoa(i), strconv.Itoa(i), time.Second)
+		_ = redis.Set(strconv.Itoa(i), strconv.Itoa(i), time.Second)
 		i++
 
 	}
@@ -630,7 +433,7 @@ func BenchmarkTCP1Get(b *testing.B) {
 	var i = 0
 
 	for n := 0; n < b.N; n++ {
-		tcp.Get(strconv.Itoa(i))
+		_, _ = redis.Get(strconv.Itoa(i))
 		i++
 	}
 }

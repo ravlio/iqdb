@@ -1,4 +1,4 @@
-package redis
+package iqdb
 
 import (
 	"bufio"
@@ -7,22 +7,22 @@ import (
 	"strconv"
 )
 
-type Reader struct {
+type redisReader struct {
 	r *bufio.Reader
 }
 
-func NewReader(r *bufio.Reader) *Reader {
-	return &Reader{
+func newRedisReader(r *bufio.Reader) *redisReader {
+	return &redisReader{
 		r: r,
 	}
 }
 
-func (r *Reader) Read() (*Message, error) {
+func (r *redisReader) Read() (*redisMessage, error) {
 	return read(r.r)
 }
 
-// Redis protocol reader
-func read(r *bufio.Reader) (*Message, error) {
+// RedisClient protocol redisReader
+func read(r *bufio.Reader) (*redisMessage, error) {
 	line, e := r.ReadBytes('\n')
 
 	if e != nil {
@@ -30,44 +30,44 @@ func read(r *bufio.Reader) (*Message, error) {
 	}
 
 	line = line[:len(line)-2]
-	msgtype := string(line[0])
+	msgtype := redisType(line[0])
 	data := string(line[1:])
 
 	switch msgtype {
-	case TypeString:
-		return &Message{
-			Type:   TypeString,
+	case redisTypeString:
+		return &redisMessage{
+			Type:   redisTypeString,
 			String: data,
 		}, nil
 
-	case TypeError:
-		return &Message{
-			Type: TypeError,
+	case redisTypeError:
+		return &redisMessage{
+			Type: redisTypeError,
 			Err:  errors.New(data),
 		}, nil
-	case TypeInteger:
+	case redisTypeInteger:
 		c, err := strconv.ParseInt(data, 10, 64)
 		if err != nil {
 			return nil, err
 		}
-		return &Message{
-			Type: TypeInteger,
+		return &redisMessage{
+			Type: redisTypeInteger,
 			Int:  c,
 		}, nil
-	case TypeArray:
+	case redisTypeArray:
 		l, e := strconv.Atoi(data)
 		if e != nil {
 			return nil, e
 		}
 
 		if l == -1 {
-			return &Message{
-				Type: TypeArray,
+			return &redisMessage{
+				Type: redisTypeArray,
 				Arr:  nil,
 			}, nil
 		}
 
-		ret := make([]*Message, l)
+		ret := make([]*redisMessage, l)
 		for i := 0; i < l; i++ {
 			m, err := read(r)
 			if err != nil {
@@ -75,21 +75,21 @@ func read(r *bufio.Reader) (*Message, error) {
 			}
 			ret[i] = m
 		}
-		return &Message{
-			Type: TypeArray,
+		return &redisMessage{
+			Type: redisTypeArray,
 			Arr:  ret,
 		}, nil
 
-	case TypeBulk:
+	case redisTypeBulk:
 		l, e := strconv.Atoi(data)
 		if e != nil {
 			return nil, e
 		}
 
 		if l < 0 {
-			return &Message{
+			return &redisMessage{
 				Bulk: nil,
-				Type: TypeBulk,
+				Type: redisTypeBulk,
 			}, nil
 		}
 
@@ -97,11 +97,11 @@ func read(r *bufio.Reader) (*Message, error) {
 		if _, err := io.ReadFull(r, buf); err != nil {
 			return nil, err
 		}
-		return &Message{
+		return &redisMessage{
 			Bulk: buf[:l],
-			Type: TypeBulk,
+			Type: redisTypeBulk,
 		}, nil
 	}
 
-	return nil, errors.New("error parsing Redis protocol")
+	return nil, errors.New("error parsing RedisClient protocol")
 }

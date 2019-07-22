@@ -79,7 +79,7 @@ func (t *ttlTree) checkTTL() {
 	}
 }
 
-func NewTTLTree(delCb func(key string) error) *ttlTree {
+func newTTLTree(delCb func(key string) error) *ttlTree {
 	tree := &ttlTree{
 		delCb:  delCb,
 		tree:   btree.New(32),

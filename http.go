@@ -4,6 +4,7 @@ import (
 	"time"
 )
 
+// TODO implement HTTP
 type http struct {
 }
 

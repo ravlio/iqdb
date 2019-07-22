@@ -14,7 +14,7 @@ func ExampleEmbeddedServer() {
 	}
 
 	// Open new db or use existing one
-	db, err = iqdb.Open("test", &iqdb.Options{TCPPort: 7777, HTTPPort: 8888, ShardCount: 100})
+	db, err = iqdb.Open("test", &iqdb.Options{RedisPort: 7777, HTTPPort: 8888, ShardCount: 100})
 	defer db.Close()
 
 	if err != nil {
@@ -32,8 +32,8 @@ func ExampleEmbeddedServer() {
 	}
 }
 
-func ExampleTCPClient() {
-	tcp, err := iqdb.MakeTCPClient(":7777")
+func ExampleRedisClient() {
+	tcp, err := iqdb.NewRedisClient(":7777")
 
 	if err != nil {
 		panic(err)
