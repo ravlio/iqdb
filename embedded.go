@@ -5,24 +5,6 @@ import (
 	"time"
 )
 
-type Client interface {
-	Get(key string) (string, error)
-	Set(key, value string, ttl ...time.Duration) error
-	Remove(key string) error
-	TTL(key string, ttl time.Duration) error
-	Keys() chan<- string
-	ListLen(key string) (int, error)
-	ListIndex(key string, index int) (string, error)
-	ListPush(key string, value ...string) (int, error)
-	ListPop(key string) (int, error)
-	ListRange(key string, from, to int) ([]string, error)
-	HashGet(key string, field string) (string, error)
-	HashGetAll(key string) (map[string]string, error)
-	HashKeys(key string) ([]string, error)
-	HashDel(key string, field string) error
-	HashSet(key string, args ...string) error
-}
-
 // Get value by key
 // Returns value in string on success and error on failure
 func (iq *IqDB) Get(key string) (string, error) {

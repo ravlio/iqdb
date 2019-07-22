@@ -3,8 +3,8 @@ package redis
 import (
 	"bufio"
 	"errors"
-	"strconv"
 	"io"
+	"strconv"
 )
 
 type Reader struct {
@@ -63,7 +63,7 @@ func read(r *bufio.Reader) (*Message, error) {
 		if l == -1 {
 			return &Message{
 				Type: TypeArray,
-				Arr:nil,
+				Arr:  nil,
 			}, nil
 		}
 

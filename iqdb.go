@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	//"fmt"
 )
 
 var ErrKeyNotFound = errors.New("key not found")
@@ -38,6 +37,24 @@ const (
 	opHashDel  = 6
 	opHashSet  = 7
 )
+
+type Client interface {
+	Get(key string) (string, error)
+	Set(key, value string, ttl ...time.Duration) error
+	Remove(key string) error
+	TTL(key string, ttl time.Duration) error
+	Keys() chan<- string
+	ListLen(key string) (int, error)
+	ListIndex(key string, index int) (string, error)
+	ListPush(key string, value ...string) (int, error)
+	ListPop(key string) (int, error)
+	ListRange(key string, from, to int) ([]string, error)
+	HashGet(key string, field string) (string, error)
+	HashGetAll(key string) (map[string]string, error)
+	HashKeys(key string) ([]string, error)
+	HashDel(key string, field string) error
+	HashSet(key string, args ...string) error
+}
 
 type Options struct {
 	TCPPort  int
@@ -95,7 +112,6 @@ type list struct {
 }
 
 type hash struct {
-	// go 1.9+ sync.Map
 	hash *sync.Map
 }
 
@@ -118,7 +134,7 @@ func Open(fname string, opts *Options) (*IqDB, error) {
 		distmap: NewDistmap(opts.ShardCount),
 		errch:   make(chan error),
 		syncMx:  &sync.Mutex{},
-		stopc: make(chan struct{},1),
+		stopc:   make(chan struct{}, 1),
 	}
 
 	db.ttl = NewTTLTree(db.removeFromHash)

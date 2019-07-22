@@ -1,8 +1,8 @@
 package iqdb_test
 
 import (
-	"os"
 	"github.com/ravlio/iqdb"
+	"os"
 )
 
 func ExampleEmbeddedServer() {

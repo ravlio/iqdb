@@ -1,9 +1,9 @@
 package iqdb
 
 import (
-	"time"
-	"sync"
 	"github.com/google/btree"
+	"sync"
+	"time"
 )
 
 type TTLTreeItem interface {

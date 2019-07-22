@@ -4,9 +4,9 @@ import "errors"
 
 type MessageType string
 
-var ErrWrongArgNum = errors.New("Wrong arguments number")
-var ErrWrongTTL = errors.New("Wrong TTL")
-var ErrUnknownParseError = errors.New("Unknown parse error")
+var ErrWrongArgNum = errors.New("wrong arguments number")
+var ErrWrongTTL = errors.New("wrong TTL")
+var ErrUnknownParseError = errors.New("unknown parse error")
 
 const (
 	TypeString  = "+"

@@ -2,10 +2,10 @@ package iqdb_test
 
 import (
 	"github.com/ravlio/iqdb"
-	"strconv"
-	"testing"
-	"sync"
 	"math/rand"
+	"strconv"
+	"sync"
+	"testing"
 )
 
 var m map[string]*iqdb.KV

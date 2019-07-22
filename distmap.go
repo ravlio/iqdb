@@ -1,9 +1,9 @@
 package iqdb
 
 import (
-	"sync"
 	"crypto/sha1"
 	"encoding/binary"
+	"sync"
 )
 
 type distmap struct {
@@ -109,6 +109,5 @@ func NewDistmap(shardCount int) *distmap {
 		}
 	}
 
-	
 	return dm
 }
