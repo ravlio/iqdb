@@ -1,13 +1,13 @@
 package iqdb_test
 
 import (
+	"github.com/ravlio/iqdb"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
-	"testing"
-)
-import "github.com/ravlio/iqdb"
-import (
+	"net"
 	"os"
 	"strconv"
+	"testing"
 	"time"
 )
 
@@ -16,6 +16,7 @@ var direct iqdb.Client
 var redis iqdb.Client
 var http iqdb.Client
 
+// End-to-End tests
 func TestMain(m *testing.M) {
 	var err error
 
@@ -42,12 +43,21 @@ func TestMain(m *testing.M) {
 	}
 
 	// Give it a chance to start listen connections before client will call
-	time.Sleep(time.Second)
+	i := 0
+	for {
+		logrus.Info("trying to connect to :7777...")
+		_, err := net.Dial("tcp", ":7777")
+		if err == nil {
+			break
+		}
+		if i > 5 {
+			logrus.Fatal("error connecting to Redis port")
+		}
+		i++
+		time.Sleep(time.Millisecond * 10)
+	}
 
-	// conversion from struct to Client interface
-	var i interface{} = db
-
-	direct = i.(iqdb.Client)
+	direct = iqdb.Client(db)
 
 	redis, err = iqdb.NewRedisClient(":7777")
 	if err != nil {
