@@ -35,12 +35,11 @@ func TestMain(m *testing.M) {
 	// Start servers
 	// Additional goroutine is needed to allow make servers and clients in same time
 	go func() {
-		panic(db.Start())
+		err := db.Start()
+		if err != nil {
+			panic(err)
+		}
 	}()
-
-	if err != nil {
-		panic(err)
-	}
 
 	// Give it a chance to start listen connections before client will call
 	i := 0
